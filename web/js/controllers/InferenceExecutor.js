@@ -4,6 +4,8 @@
  * Handles Web Worker lifecycle for ONNX model inference.
  */
 
+import { VERSION } from '../app/config.js';
+
 export class InferenceExecutor {
   constructor(options) {
     this.updateOutput = options.updateOutput || (() => {});
@@ -33,7 +35,7 @@ export class InferenceExecutor {
   _setupWorker() {
     if (this.worker) return;
 
-    this.worker = new Worker('js/inference-worker.js');
+    this.worker = new Worker(`js/inference-worker.js?v=${VERSION}`);
 
     this.worker.onmessage = (e) => {
       const { type, ...data } = e.data;
