@@ -19,7 +19,6 @@ export class ViewerController {
    * @param {Object} colormapData - { R, G, B, A } arrays from labels.js
    */
   registerMuscleColormap(colormapData) {
-    if (this.muscleColormapRegistered) return;
     try {
       this.nv.addColormap('musclemap', colormapData);
       this.muscleColormapRegistered = true;

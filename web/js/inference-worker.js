@@ -192,8 +192,12 @@ function createOutputNifti(uint8Data, sourceHeader, dims) {
     destView.setInt16(48, 1, true);
   }
 
-  destView.setFloat32(112, 1, true);
-  destView.setFloat32(116, 0, true);
+  destView.setFloat32(112, 1, true);  // scl_slope
+  destView.setFloat32(116, 0, true);  // scl_inter
+
+  // Set cal_min/cal_max so NiiVue maps label values 1:1 to colormap indices
+  destView.setFloat32(124, 255, true);  // cal_max
+  destView.setFloat32(128, 0, true);    // cal_min
 
   new Uint8Array(buffer, headerSize).set(uint8Data);
   return buffer;
