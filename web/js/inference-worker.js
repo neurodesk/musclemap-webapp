@@ -726,24 +726,11 @@ async function runInference(config) {
 
   postProgress(0.30, 'Loading ONNX model...');
   const executionProviders = self._useWebGPU ? ['webgpu', 'wasm'] : ['wasm'];
-  postLog(`Creating ONNX InferenceSession (${executionProviders[0]})...`);
-  let session;
-  try {
-    session = await ort.InferenceSession.create(modelData, {
-      executionProviders,
-      graphOptimizationLevel: 'all'
-    });
-  } catch (e) {
-    if (self._useWebGPU) {
-      postLog(`WebGPU session failed (${e.message}), falling back to WASM...`);
-      session = await ort.InferenceSession.create(modelData, {
-        executionProviders: ['wasm'],
-        graphOptimizationLevel: 'all'
-      });
-    } else {
-      throw e;
-    }
-  }
+  postLog(`Creating ONNX InferenceSession (${executionProviders.join(', ')})...`);
+  const session = await ort.InferenceSession.create(modelData, {
+    executionProviders,
+    graphOptimizationLevel: 'all'
+  });
   postLog(`Session created. Input: ${session.inputNames}, Output: ${session.outputNames}`);
 
   // 7. Precompute Gaussian weight map

@@ -12,7 +12,9 @@ echo "Downloading ONNX Runtime Web v${ORT_VERSION}..."
 
 ORT_FILES=(
   ort.webgpu.min.js
+  ort-wasm-simd-threaded.mjs
   ort-wasm-simd-threaded.wasm
+  ort-wasm-simd-threaded.jsep.mjs
   ort-wasm-simd-threaded.jsep.wasm
 )
 
