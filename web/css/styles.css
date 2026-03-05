@@ -1302,6 +1302,14 @@ input[type="range"]:disabled::-moz-range-thumb {
   line-height: 1.4;
 }
 
+.about-modal-icon {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
 .about-modal h4 {
   font-size: 0.9rem;
   margin: var(--space-md) 0 var(--space-sm);
