@@ -89,12 +89,14 @@ export class ViewerController {
   setBaseOpacity(value) {
     if (this.nv.volumes.length > 0) {
       this.nv.setOpacity(0, value);
+      this.nv.updateGLVolume();
     }
   }
 
   setOverlayOpacity(value) {
     if (this.nv.volumes.length > 1) {
       this.nv.setOpacity(1, value);
+      this.nv.updateGLVolume();
     }
   }
 
