@@ -1,0 +1,51 @@
+name: Release From Config Version
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - web/js/app/config.js
+      - scripts/get_version.sh
+      - .github/workflows/release-from-config.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version from config
+        id: version
+        run: |
+          VERSION="$(bash scripts/get_version.sh)"
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved release tag: ${TAG}"
+
+      - name: Ensure tag is not reused across commits
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            TAG_SHA="$(git rev-list -n1 "${TAG}")"
+            if [[ "${TAG_SHA}" != "${GITHUB_SHA}" ]]; then
+              echo "Tag ${TAG} already exists at ${TAG_SHA}, but this run is ${GITHUB_SHA}."
+              echo "Bump VERSION in web/js/app/config.js before creating a new release."
+              exit 1
+            fi
+          fi
+
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          make_latest: true
