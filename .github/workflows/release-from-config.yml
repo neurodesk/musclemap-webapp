@@ -50,23 +50,7 @@ jobs:
             FULL_MESSAGES="$(git log -1 --format=%B "${RANGE_END}")"
           fi
 
-          BUMP="patch"
-          if printf '%s\n' "$FULL_MESSAGES" | grep -Eiq 'BREAKING CHANGE|#major|\[major\]'; then
-            BUMP="major"
-          elif printf '%s\n' "$SUBJECTS" | grep -Eiq '^feat(\([^)]+\))?:|#minor|\[minor\]'; then
-            BUMP="minor"
-          fi
-          if printf '%s\n' "$SUBJECTS" | grep -Eiq '^[a-z]+(\([^)]+\))?!:'; then
-            BUMP="major"
-          fi
-
-          if [[ "$BUMP" == "major" ]]; then
-            NEXT="$((BASE_MAJOR + 1)).0.0"
-          elif [[ "$BUMP" == "minor" ]]; then
-            NEXT="${BASE_MAJOR}.$((BASE_MINOR + 1)).0"
-          else
-            NEXT="${BASE_MAJOR}.${BASE_MINOR}.$((BASE_PATCH + 1))"
-          fi
+          NEXT="${BASE_MAJOR}.${BASE_MINOR}.$((BASE_PATCH + 1))"
 
           TAG="v${NEXT}"
           echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
