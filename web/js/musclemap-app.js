@@ -72,7 +72,7 @@ class MuscleMapApp {
       onStageData: (data) => this.handleStageData(data),
       onComplete: () => this.onInferenceComplete(),
       onError: (msg) => this.onInferenceError(msg),
-      onInitialized: () => {},
+      onInitialized: () => this.onWorkerInitialized(),
       onDetectedLabels: (labels) => this.showDetectedMuscles(labels)
     });
 
@@ -511,6 +511,10 @@ class MuscleMapApp {
     const chunkSizeRaw = chunkSizeSelect ? chunkSizeSelect.value : Config.INFERENCE_DEFAULTS.chunkSize;
     const chunkSize = chunkSizeRaw === 'auto' ? 'auto' : parseInt(chunkSizeRaw, 10);
 
+    // Get WebGPU toggle state
+    const webgpuToggle = document.getElementById('webgpuToggle');
+    const useWebGPU = webgpuToggle ? webgpuToggle.checked : true;
+
     const modelBaseUrl = new URL(Config.MODEL_BASE_URL, window.location.href).href;
     const inputData = await file.arrayBuffer();
 
@@ -540,7 +544,8 @@ class MuscleMapApp {
         roiSize: modelConfig.roiSize,
         overlap,
         chunkSize,
-        modelBaseUrl
+        modelBaseUrl,
+        useWebGPU
       }
     });
   }
@@ -610,6 +615,13 @@ class MuscleMapApp {
       return label || { index: idx, name: getLabelName(idx, modelLabels), color: getLabelColor(idx, modelLabels) };
     });
     this.muscleLegend.show(detected);
+  }
+
+  onWorkerInitialized() {
+    if (this.inferenceExecutor.webgpuAvailable) {
+      const group = document.getElementById('webgpuGroup');
+      if (group) group.classList.remove('hidden');
+    }
   }
 
   onInferenceComplete() {

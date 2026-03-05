@@ -20,6 +20,7 @@ export class InferenceExecutor {
     this.workerReady = false;
     this.workerInitializing = false;
     this.running = false;
+    this.webgpuAvailable = false;
     this.results = {};
     this.stageOrder = [];
   }
@@ -53,6 +54,7 @@ export class InferenceExecutor {
         case 'initialized':
           this.workerReady = true;
           this.workerInitializing = false;
+          this.webgpuAvailable = !!data.webgpuAvailable;
           this.updateOutput('ONNX Runtime ready');
           this.onInitialized();
           break;

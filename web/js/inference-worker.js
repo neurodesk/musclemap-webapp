@@ -648,8 +648,18 @@ async function runInference(config) {
     roiSize: roiSizeSetting,
     overlap = 0.5,
     chunkSize: chunkSizeSetting = 'auto',
-    modelBaseUrl
+    modelBaseUrl,
+    useWebGPU: useWebGPUSetting
   } = settings;
+
+  // Override WebGPU setting per-run (user may have toggled the checkbox)
+  const useWebGPU = self._useWebGPU && (useWebGPUSetting !== false);
+  if (!useWebGPU && self._useWebGPU) {
+    // User forced WASM — use max threads
+    const maxThreads = navigator.hardwareConcurrency || 4;
+    ort.env.wasm.numThreads = maxThreads;
+    postLog(`Forcing WASM backend with ${maxThreads} threads`);
+  }
 
   const NUM_CLASSES = numClassesSetting || 100;
   const [ROI_H, ROI_W] = roiSizeSetting || [256, 256];
@@ -726,7 +736,7 @@ async function runInference(config) {
   const modelData = await fetchModel(modelUrl, modelName, 0.15, 0.15);
 
   postProgress(0.30, 'Loading ONNX model...');
-  const executionProviders = self._useWebGPU ? ['webgpu', 'wasm'] : ['wasm'];
+  const executionProviders = useWebGPU ? ['webgpu', 'wasm'] : ['wasm'];
   postLog(`Creating ONNX InferenceSession (${executionProviders.join(', ')})...`);
   const session = await ort.InferenceSession.create(modelData, {
     executionProviders,
@@ -743,7 +753,7 @@ async function runInference(config) {
   const sliceSize = cnx * cny;
 
   const resolvedChunkSize = resolveChunkSize(chunkSizeSetting, NUM_CLASSES, ROI_H, ROI_W);
-  postLog(`Starting 2D inference: ${cnz} slices, overlap=${overlap}, chunkSize=${resolvedChunkSize}${chunkSizeSetting === 'auto' ? ' (auto)' : ''}, backend=${self._useWebGPU ? 'webgpu' : 'wasm'}`);
+  postLog(`Starting 2D inference: ${cnz} slices, overlap=${overlap}, chunkSize=${resolvedChunkSize}${chunkSizeSetting === 'auto' ? ' (auto)' : ''}, backend=${useWebGPU ? 'webgpu' : 'wasm'}`);
   const inferenceStartTime = performance.now();
 
   for (let z = 0; z < cnz; z++) {
@@ -992,7 +1002,7 @@ self.onmessage = async (e) => {
           storeName: 'models'
         });
 
-        self.postMessage({ type: 'initialized' });
+        self.postMessage({ type: 'initialized', webgpuAvailable: self._useWebGPU });
       } catch (error) {
         postError(`Initialization failed: ${error.message}`);
       }
