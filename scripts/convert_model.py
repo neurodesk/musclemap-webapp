@@ -76,8 +76,8 @@ def export_to_onnx(model, output_path, roi_size=256, opset_version=17):
         input_names=["input"],
         output_names=["output"],
         dynamic_axes={
-            "input": {2: "height", 3: "width"},
-            "output": {2: "height", 3: "width"},
+            "input": {0: "batch", 2: "height", 3: "width"},
+            "output": {0: "batch", 2: "height", 3: "width"},
         },
         dynamo=False,
     )

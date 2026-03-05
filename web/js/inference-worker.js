@@ -741,9 +741,8 @@ async function runInference(config) {
   const labelVolume = new Uint8Array(cnx * cny * cnz);
   const sliceSize = cnx * cny;
 
-  // WebGPU does not support dynamic batch sizes, so force chunkSize=1
-  const resolvedChunkSize = self._useWebGPU ? 1 : resolveChunkSize(chunkSizeSetting, NUM_CLASSES, ROI_H, ROI_W);
-  postLog(`Starting 2D inference: ${cnz} slices, overlap=${overlap}, chunkSize=${resolvedChunkSize}${self._useWebGPU ? ' (webgpu)' : chunkSizeSetting === 'auto' ? ' (auto)' : ''}`);
+  const resolvedChunkSize = resolveChunkSize(chunkSizeSetting, NUM_CLASSES, ROI_H, ROI_W);
+  postLog(`Starting 2D inference: ${cnz} slices, overlap=${overlap}, chunkSize=${resolvedChunkSize}${chunkSizeSetting === 'auto' ? ' (auto)' : ''}, backend=${self._useWebGPU ? 'webgpu' : 'wasm'}`);
   const inferenceStartTime = performance.now();
 
   for (let z = 0; z < cnz; z++) {
