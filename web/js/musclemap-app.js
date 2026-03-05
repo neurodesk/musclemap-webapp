@@ -141,7 +141,8 @@ class MuscleMapApp {
 
     const modelLabels = getLabelsForModel(this.currentModelName);
     const labelName = getLabelName(labelIndex, modelLabels);
-    return `#${labelIndex} ${labelName}`;
+    const labelValue = modelLabels[labelIndex]?.value ?? labelIndex;
+    return `#${labelValue} ${labelName}`;
   }
 
   // ==================== Event Listeners ====================

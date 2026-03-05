@@ -49,7 +49,7 @@ export class MuscleLegend {
 
       const idx = document.createElement('span');
       idx.className = 'legend-index';
-      idx.textContent = `#${label.index}`;
+      idx.textContent = `#${label.value}`;
 
       item.appendChild(swatch);
       item.appendChild(name);
