@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: release-main
@@ -40,29 +41,17 @@ jobs:
           fi
           IFS='.' read -r BASE_MAJOR BASE_MINOR BASE_PATCH <<< "$BASE_VERSION"
 
-          RANGE_START="${{ github.event.before }}"
-          RANGE_END="${{ github.sha }}"
-          if [[ "${{ github.event_name }}" == "push" && "$RANGE_START" != "0000000000000000000000000000000000000000" ]]; then
-            SUBJECTS="$(git log --format=%s "${RANGE_START}..${RANGE_END}")"
-            FULL_MESSAGES="$(git log --format=%B "${RANGE_START}..${RANGE_END}")"
-          else
-            SUBJECTS="$(git log -1 --format=%s "${RANGE_END}")"
-            FULL_MESSAGES="$(git log -1 --format=%B "${RANGE_END}")"
-          fi
-
           NEXT="${BASE_MAJOR}.${BASE_MINOR}.$((BASE_PATCH + 1))"
 
           TAG="v${NEXT}"
           echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
           echo "base=${BASE_VERSION}" >> "$GITHUB_OUTPUT"
           echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
-          echo "bump=${BUMP}" >> "$GITHUB_OUTPUT"
           echo "version=${NEXT}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Current version: ${CURRENT}"
           echo "Latest tag: ${LATEST_TAG:-none}"
           echo "Base version: ${BASE_VERSION}"
-          echo "Bump type: ${BUMP}"
           echo "Next version: ${NEXT}"
 
       - name: Check if tag already exists
@@ -110,3 +99,8 @@ jobs:
             echo "Creating release ${TAG}."
             gh release create "$TAG" --generate-notes --title "$TAG" --latest
           fi
+
+      - name: Trigger deploy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run deploy.yml --ref main
