@@ -1034,9 +1034,35 @@ async function runInference(config) {
     totalSlices: onz
   });
 
-  // 11. Create output NIfTI
+  // 11. Create output NIfTI (full resolution for download)
   const outputNifti = createOutputNifti(outputLabels, headerBytes, origDims);
   postStageData('segmentation', outputNifti, 'Muscle segmentation');
+
+  // 12. Create downsampled display NIfTI for faster 3D rendering
+  const DISPLAY_MAX_DIM = 128;
+  const maxDim = Math.max(...origDims);
+  if (maxDim > DISPLAY_MAX_DIM) {
+    const scale = DISPLAY_MAX_DIM / maxDim;
+    const displayDims = origDims.map(d => Math.max(1, Math.round(d * scale)));
+    const displayLabels = resampleLabelsNearest(outputLabels, origDims, displayDims);
+    const displayNifti = createOutputNifti(displayLabels, headerBytes, displayDims);
+    // Adjust pixdims and affine for the downsampled resolution
+    const dv = new DataView(displayNifti);
+    const srcView = new DataView(headerBytes);
+    for (let i = 1; i <= 3; i++) {
+      const origPixdim = Math.abs(srcView.getFloat32(76 + i * 4, true));
+      dv.setFloat32(76 + i * 4, origPixdim * origDims[i-1] / displayDims[i-1], true);
+    }
+    // Scale sform affine row vectors to match new voxel size
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 3; col++) {
+        const offset = 280 + row * 16 + col * 4;
+        const val = srcView.getFloat32(offset, true);
+        dv.setFloat32(offset, val * origDims[col] / displayDims[col], true);
+      }
+    }
+    postStageData('segmentation_display', displayNifti, 'Muscle segmentation (display)');
+  }
 
   let totalVoxels = 0;
   for (let i = 0; i < outputLabels.length; i++) {

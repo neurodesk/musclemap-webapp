@@ -618,13 +618,6 @@ class MuscleMapApp {
 
     this.addVolumeToggles();
 
-    const result = this.inferenceExecutor.getResult('segmentation');
-    if (result?.file && this.inputFile) {
-      this.viewerController.showResultAsOverlay(this.inputFile, result.file, 'musclemap').then(() => {
-        this.syncWindowControls();
-      });
-    }
-
     const overlayControl = document.getElementById('overlayControl');
     if (overlayControl) overlayControl.classList.remove('hidden');
   }
@@ -734,6 +727,16 @@ class MuscleMapApp {
     if (runBtn) runBtn.disabled = false;
     if (cancelBtn) cancelBtn.disabled = true;
     if (statusText) statusText.textContent = 'Ready';
+
+    // Load segmentation into viewer: prefer downsampled display version for faster 3D rendering
+    const displayResult = this.inferenceExecutor.getResult('segmentation_display');
+    const fullResult = this.inferenceExecutor.getResult('segmentation');
+    const overlayFile = displayResult?.file || fullResult?.file;
+    if (overlayFile && this.inputFile) {
+      this.viewerController.showResultAsOverlay(this.inputFile, overlayFile, 'musclemap').then(() => {
+        this.syncWindowControls();
+      });
+    }
   }
 
   onInferenceError(msg) {
