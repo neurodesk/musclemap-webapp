@@ -20,6 +20,20 @@ export class ConsoleOutput {
     console.log(text);
   }
 
+  copyToClipboard() {
+    const outputElement = document.getElementById(this.outputElementId);
+    if (!outputElement) return;
+    const lines = outputElement.querySelectorAll('.console-line');
+    const text = Array.from(lines).map(line => line.textContent).join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = document.getElementById('copyConsole');
+      if (btn) {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+      }
+    });
+  }
+
   clear() {
     const outputElement = document.getElementById(this.outputElementId);
     if (outputElement) {

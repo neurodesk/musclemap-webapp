@@ -130,6 +130,9 @@ class MuscleMapApp {
     const cancelBtn = document.getElementById('cancelButton');
     if (cancelBtn) cancelBtn.addEventListener('click', () => this.cancelSegmentation());
 
+    const copyConsole = document.getElementById('copyConsole');
+    if (copyConsole) copyConsole.addEventListener('click', () => this.console.copyToClipboard());
+
     const clearConsole = document.getElementById('clearConsole');
     if (clearConsole) clearConsole.addEventListener('click', () => this.console.clear());
 
