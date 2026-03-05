@@ -809,21 +809,30 @@ async function runInference(config) {
       continue;
     }
 
-    // Pad slice if smaller than ROI
-    let inferH = cny, inferW = cnx;
-    let paddedSlice = slice;
+    // Transpose slice from NIfTI Fortran order to model order (rows=X, cols=Y)
+    // NIfTI: slice[x + y*cnx], Model expects: transposed[x*cny + y]
+    const transposed = new Float32Array(sliceSize);
+    for (let x = 0; x < cnx; x++) {
+      for (let y = 0; y < cny; y++) {
+        transposed[x * cny + y] = slice[x + y * cnx];
+      }
+    }
+
+    // Pad transposed slice if smaller than ROI (height=cnx, width=cny after transpose)
+    let inferH = cnx, inferW = cny;
+    let paddedSlice = transposed;
     let padOffsetX = 0, padOffsetY = 0;
 
-    if (cny < ROI_H || cnx < ROI_W) {
-      inferH = Math.max(cny, ROI_H);
-      inferW = Math.max(cnx, ROI_W);
+    if (cnx < ROI_H || cny < ROI_W) {
+      inferH = Math.max(cnx, ROI_H);
+      inferW = Math.max(cny, ROI_W);
       paddedSlice = new Float32Array(inferH * inferW);
-      padOffsetY = Math.floor((inferH - cny) / 2);
-      padOffsetX = Math.floor((inferW - cnx) / 2);
-      for (let y = 0; y < cny; y++) {
+      padOffsetY = Math.floor((inferH - cnx) / 2);
+      padOffsetX = Math.floor((inferW - cny) / 2);
+      for (let r = 0; r < cnx; r++) {
         paddedSlice.set(
-          slice.subarray(y * cnx, y * cnx + cnx),
-          (y + padOffsetY) * inferW + padOffsetX
+          transposed.subarray(r * cny, r * cny + cny),
+          (r + padOffsetY) * inferW + padOffsetX
         );
       }
     }
@@ -900,12 +909,13 @@ async function runInference(config) {
           if (val > bestVal) { bestVal = val; bestClass = c; }
         }
 
-        // Map back from padded coords to original
-        const py = Math.floor(i / inferW);
-        const px = i % inferW;
-        const oy = py - padOffsetY;
-        const ox = px - padOffsetX;
-        if (oy >= 0 && oy < cny && ox >= 0 && ox < cnx) {
+        // Map back from padded coords to original volume (Fortran order)
+        // After transpose: rows=X, cols=Y
+        const pr = Math.floor(i / inferW);
+        const pc = i % inferW;
+        const ox = pr - padOffsetY;  // row → X spatial
+        const oy = pc - padOffsetX;  // col → Y spatial
+        if (ox >= 0 && ox < cnx && oy >= 0 && oy < cny) {
           labelVolume[z * sliceSize + oy * cnx + ox] = bestClass;
         }
       }
@@ -930,9 +940,10 @@ async function runInference(config) {
             const val = output[c * ROI_H * ROI_W + py * ROI_W + px];
             if (val > bestVal) { bestVal = val; bestClass = c; }
           }
-          const oy = (cy + py) - padOffsetY;
-          const ox = (cx + px) - padOffsetX;
-          if (oy >= 0 && oy < cny && ox >= 0 && ox < cnx) {
+          // After transpose: rows=X, cols=Y
+          const ox = (cy + py) - padOffsetY;  // row → X spatial
+          const oy = (cx + px) - padOffsetX;  // col → Y spatial
+          if (ox >= 0 && ox < cnx && oy >= 0 && oy < cny) {
             labelVolume[z * sliceSize + oy * cnx + ox] = bestClass;
           }
         }
