@@ -1,4 +1,4 @@
-name: Auto Release And Version Bump
+name: Release
 
 on:
   push:
@@ -103,4 +103,4 @@ jobs:
       - name: Trigger deploy
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run deploy.yml --ref main
+        run: gh workflow run deploy-pages.yml --ref main

@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
   workflow_run:
-    workflows: ["Auto Release And Version Bump"]
+    workflows: ["Release"]
     types: [completed]
   workflow_dispatch:
 
