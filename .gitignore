@@ -12,6 +12,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Temporary model weights
+.tmp_weights/
+
 # Python
 __pycache__/
 *.pyc

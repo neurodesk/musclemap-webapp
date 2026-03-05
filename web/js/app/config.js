@@ -39,7 +39,7 @@ export const STAGE_NAMES = {
 };
 
 export const ONNX_CONFIG = {
-  executionProviders: ['wasm'],
+  executionProviders: ['webgpu', 'wasm'],
   graphOptimizationLevel: 'all'
 };
 

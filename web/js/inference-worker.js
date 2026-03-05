@@ -7,7 +7,7 @@
 
 /* global importScripts, ort, localforage, nifti */
 
-importScripts('../wasm/ort.min.js');
+importScripts('../wasm/ort.webgpu.min.js');
 importScripts('https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js');
 importScripts('../nifti-js/index.js');
 
@@ -725,11 +725,25 @@ async function runInference(config) {
   const modelData = await fetchModel(modelUrl, modelName, 0.15, 0.15);
 
   postProgress(0.30, 'Loading ONNX model...');
-  postLog('Creating ONNX InferenceSession...');
-  const session = await ort.InferenceSession.create(modelData, {
-    executionProviders: ['wasm'],
-    graphOptimizationLevel: 'all'
-  });
+  const executionProviders = self._useWebGPU ? ['webgpu', 'wasm'] : ['wasm'];
+  postLog(`Creating ONNX InferenceSession (${executionProviders[0]})...`);
+  let session;
+  try {
+    session = await ort.InferenceSession.create(modelData, {
+      executionProviders,
+      graphOptimizationLevel: 'all'
+    });
+  } catch (e) {
+    if (self._useWebGPU) {
+      postLog(`WebGPU session failed (${e.message}), falling back to WASM...`);
+      session = await ort.InferenceSession.create(modelData, {
+        executionProviders: ['wasm'],
+        graphOptimizationLevel: 'all'
+      });
+    } else {
+      throw e;
+    }
+  }
   postLog(`Session created. Input: ${session.inputNames}, Output: ${session.outputNames}`);
 
   // 7. Precompute Gaussian weight map
@@ -966,6 +980,23 @@ self.onmessage = async (e) => {
       try {
         ort.env.wasm.numThreads = navigator.hardwareConcurrency > 1 ? 2 : 1;
         ort.env.wasm.wasmPaths = '../wasm/';
+
+        // Detect WebGPU support
+        self._useWebGPU = false;
+        if (typeof navigator !== 'undefined' && navigator.gpu) {
+          try {
+            const adapter = await navigator.gpu.requestAdapter();
+            if (adapter) {
+              self._useWebGPU = true;
+              postLog('WebGPU available - will use GPU acceleration');
+            }
+          } catch (e) {
+            postLog('WebGPU detection failed, using WASM backend');
+          }
+        }
+        if (!self._useWebGPU) {
+          postLog('Using WASM backend (WebGPU not available)');
+        }
 
         localforage.config({
           name: 'MuscleMapModelCache',
