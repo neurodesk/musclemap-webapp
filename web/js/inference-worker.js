@@ -40,6 +40,10 @@ function postDetectedLabels(labels) {
   self.postMessage({ type: 'detectedLabels', labels });
 }
 
+function postMetrics(metrics) {
+  self.postMessage({ type: 'metrics', metrics });
+}
+
 // ==================== NIfTI Parsing ====================
 
 function decompressIfNeeded(data) {
@@ -953,6 +957,42 @@ async function runInference(config) {
   }
   postLog(`Detected ${detectedIndices.length} muscles`);
   postDetectedLabels(detectedIndices);
+
+  // Compute volumetric metrics
+  const [onx, ony, onz] = origDims;
+  const voxelVolMm3 = origVoxelSize[0] * origVoxelSize[1] * origVoxelSize[2];
+  const labelVolumes = {};
+  const labelSliceCounts = {};
+  let totalVolumeMl = 0;
+
+  for (let i = 0; i < detectedIndices.length; i++) {
+    const idx = detectedIndices[i];
+    const volMl = labelCounts[idx] * voxelVolMm3 / 1000;
+    labelVolumes[idx] = volMl;
+    totalVolumeMl += volMl;
+  }
+
+  // Single-pass slice counting
+  const sliceLabelSets = new Array(onz);
+  for (let z = 0; z < onz; z++) sliceLabelSets[z] = new Set();
+  for (let i = 0; i < outputLabels.length; i++) {
+    if (outputLabels[i] > 0) sliceLabelSets[Math.floor(i / (onx * ony))].add(outputLabels[i]);
+  }
+  for (const idx of detectedIndices) {
+    let count = 0;
+    for (let z = 0; z < onz; z++) {
+      if (sliceLabelSets[z].has(idx)) count++;
+    }
+    labelSliceCounts[idx] = count;
+  }
+
+  postMetrics({
+    labelVolumes,
+    labelSliceCounts,
+    totalVolumeMl,
+    voxelSizeMm: origVoxelSize,
+    totalSlices: onz
+  });
 
   // 11. Create output NIfTI
   const outputNifti = createOutputNifti(outputLabels, headerBytes, origDims);

@@ -15,6 +15,7 @@ export class InferenceExecutor {
     this.onError = options.onError || (() => {});
     this.onInitialized = options.onInitialized || (() => {});
     this.onDetectedLabels = options.onDetectedLabels || (() => {});
+    this.onMetrics = options.onMetrics || (() => {});
 
     this.worker = null;
     this.workerReady = false;
@@ -66,6 +67,10 @@ export class InferenceExecutor {
           break;
         case 'detectedLabels':
           this.onDetectedLabels(data.labels);
+          break;
+        case 'metrics':
+          this.metrics = data.metrics;
+          this.onMetrics(data.metrics);
           break;
       }
     };
@@ -179,6 +184,7 @@ export class InferenceExecutor {
   clearResults() {
     this.results = {};
     this.stageOrder = [];
+    this.metrics = null;
   }
 
   async downloadStage(stage) {

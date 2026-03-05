@@ -1573,8 +1573,43 @@ input[type="range"]:disabled::-moz-range-thumb {
   flex-shrink: 0;
 }
 
+.legend-volume {
+  color: var(--color-text-dim);
+  font-size: 0.6rem;
+  flex-shrink: 0;
+  text-align: right;
+  min-width: 50px;
+}
+
 .legend-empty {
   padding: var(--space-sm) var(--space-md);
   font-size: 0.75rem;
   color: var(--color-text-dim);
+}
+
+/* Metrics Summary */
+.metrics-header {
+  display: flex;
+  gap: var(--space-md);
+  justify-content: space-around;
+}
+
+.metrics-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.metrics-stat-value {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--color-primary);
+}
+
+.metrics-stat-label {
+  font-size: 0.55rem;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }

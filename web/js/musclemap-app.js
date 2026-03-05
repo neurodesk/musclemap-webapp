@@ -12,6 +12,7 @@ import { ConsoleOutput } from './modules/ui/ConsoleOutput.js';
 import { ProgressManager } from './modules/ui/ProgressManager.js';
 import { ModalManager } from './modules/ui/ModalManager.js';
 import { MuscleLegend } from './modules/ui/MuscleLegend.js';
+import { MetricsSummary } from './modules/ui/MetricsSummary.js';
 import * as Config from './app/config.js';
 import { generateNiivueColormap, getLabelName, getLabelColor, getMuscleLabels, getLabelsForModel } from './app/labels.js';
 
@@ -30,11 +31,14 @@ class MuscleMapApp {
     this.console = new ConsoleOutput('consoleOutput');
     this.progress = new ProgressManager(Config.PROGRESS_CONFIG);
     this.muscleLegend = new MuscleLegend('muscleLegend');
+    this.metricsSummary = new MetricsSummary('metricsSummary');
 
     // State
     this.inputFile = null;
     this.currentResultTab = 'input';
     this.currentModelName = Config.MODELS[0].name;
+    this._pendingMetrics = null;
+    this._detectedLabels = null;
 
     this.init();
   }
@@ -73,7 +77,8 @@ class MuscleMapApp {
       onComplete: () => this.onInferenceComplete(),
       onError: (msg) => this.onInferenceError(msg),
       onInitialized: () => this.onWorkerInitialized(),
-      onDetectedLabels: (labels) => this.showDetectedMuscles(labels)
+      onDetectedLabels: (labels) => this.showDetectedMuscles(labels),
+      onMetrics: (metrics) => this.handleMetrics(metrics)
     });
 
     // Modals
@@ -483,8 +488,11 @@ class MuscleMapApp {
     const overlayControl = document.getElementById('overlayControl');
     if (overlayControl) overlayControl.classList.add('hidden');
 
-    // Hide legend
+    // Hide legend and metrics
     this.muscleLegend.hide();
+    this.metricsSummary.hide();
+    this._pendingMetrics = null;
+    this._detectedLabels = null;
   }
 
   // ==================== Inference ====================
@@ -527,6 +535,9 @@ class MuscleMapApp {
     this.inferenceExecutor.clearResults();
     this.disableAllResultTabs();
     this.muscleLegend.hide();
+    this.metricsSummary.hide();
+    this._pendingMetrics = null;
+    this._detectedLabels = null;
 
     // Store selected model for result display
     this.currentModelName = modelConfig.name;
@@ -614,7 +625,23 @@ class MuscleMapApp {
       const label = allLabels.find(l => l.index === idx);
       return label || { index: idx, name: getLabelName(idx, modelLabels), color: getLabelColor(idx, modelLabels) };
     });
-    this.muscleLegend.show(detected);
+    this._detectedLabels = detected;
+    this.muscleLegend.show(detected, this._pendingMetrics);
+
+    // If metrics already arrived, show summary
+    if (this._pendingMetrics) {
+      this.metricsSummary.show(this._pendingMetrics, detected);
+    }
+  }
+
+  handleMetrics(metrics) {
+    this._pendingMetrics = metrics;
+
+    // If detected labels already arrived, update legend with volumes and show summary
+    if (this._detectedLabels) {
+      this.muscleLegend.show(this._detectedLabels, metrics);
+      this.metricsSummary.show(metrics, this._detectedLabels);
+    }
   }
 
   onWorkerInitialized() {
@@ -681,6 +708,9 @@ class MuscleMapApp {
     this.inferenceExecutor.clearResults();
     this.disableAllResultTabs();
     this.muscleLegend.hide();
+    this.metricsSummary.hide();
+    this._pendingMetrics = null;
+    this._detectedLabels = null;
 
     const resultsSection = document.getElementById('resultsSection');
     if (resultsSection) {

@@ -12,8 +12,9 @@ export class MuscleLegend {
   /**
    * Show detected muscles in the legend.
    * @param {Array<{index: number, name: string, color: number[]}>} detectedLabels
+   * @param {object|null} metrics - optional metrics with labelVolumes
    */
-  show(detectedLabels) {
+  show(detectedLabels, metrics = null) {
     const container = document.getElementById(this.containerId);
     if (!container) return;
 
@@ -52,6 +53,14 @@ export class MuscleLegend {
 
       item.appendChild(swatch);
       item.appendChild(name);
+
+      if (metrics && metrics.labelVolumes && metrics.labelVolumes[label.index] != null) {
+        const vol = document.createElement('span');
+        vol.className = 'legend-volume';
+        vol.textContent = `${metrics.labelVolumes[label.index].toFixed(1)} ml`;
+        item.appendChild(vol);
+      }
+
       item.appendChild(idx);
       list.appendChild(item);
     }
