@@ -699,7 +699,7 @@ async function runInference(config) {
 
   const NUM_CLASSES = numClassesSetting || 100;
   const [ROI_H, ROI_W] = roiSizeSetting || [256, 256];
-  const TARGET_SPACING = fastMode ? [1.0, 1.0, 1.0] : [1.0, 1.0, -1];
+  const TARGET_SPACING = fastMode ? [1.0, 1.0, 2.0] : [1.0, 1.0, -1];
   const CROP_MARGIN = 20;
 
   // 1. Parse NIfTI
