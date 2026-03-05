@@ -559,6 +559,10 @@ class MuscleMapApp {
     const webgpuToggle = document.getElementById('webgpuToggle');
     const useWebGPU = webgpuToggle ? webgpuToggle.checked : true;
 
+    // Get Fast Mode toggle state
+    const fastModeToggle = document.getElementById('fastModeToggle');
+    const fastMode = fastModeToggle ? fastModeToggle.checked : false;
+
     const modelBaseUrl = new URL(Config.MODEL_BASE_URL, window.location.href).href;
     const inputData = await file.arrayBuffer();
 
@@ -592,7 +596,8 @@ class MuscleMapApp {
         overlap,
         chunkSize,
         modelBaseUrl,
-        useWebGPU
+        useWebGPU,
+        fastMode
       }
     });
   }

@@ -16,7 +16,8 @@ export const INFERENCE_DEFAULTS = {
   targetSpacing: [1.0, 1.0, -1], // -1 means keep original z spacing
   cropForegroundMargin: 20,
   overlap: 0.5, // 50% overlap for sliding window
-  chunkSize: 'auto' // Number of tiles per inference call ('auto' or 1/2/4/8)
+  chunkSize: 'auto', // Number of tiles per inference call ('auto' or 1/2/4/8)
+  fastMode: false // When true, resample all axes to 1mm isotropic
 };
 
 export const VIEWER_CONFIG = {

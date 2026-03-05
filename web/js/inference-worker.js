@@ -684,7 +684,8 @@ async function runInference(config) {
     overlap = 0.5,
     chunkSize: chunkSizeSetting = 'auto',
     modelBaseUrl,
-    useWebGPU: useWebGPUSetting
+    useWebGPU: useWebGPUSetting,
+    fastMode = false
   } = settings;
 
   // Override WebGPU setting per-run (user may have toggled the checkbox)
@@ -698,7 +699,7 @@ async function runInference(config) {
 
   const NUM_CLASSES = numClassesSetting || 100;
   const [ROI_H, ROI_W] = roiSizeSetting || [256, 256];
-  const TARGET_SPACING = [1.0, 1.0, -1];
+  const TARGET_SPACING = fastMode ? [1.0, 1.0, 1.0] : [1.0, 1.0, -1];
   const CROP_MARGIN = 20;
 
   // 1. Parse NIfTI
@@ -737,7 +738,8 @@ async function runInference(config) {
   // 3. Resample to target spacing
   postProgress(0.08, 'Resampling...');
   const needsResample = Math.abs(currentSpacing[0] - TARGET_SPACING[0]) > 0.01 ||
-                         Math.abs(currentSpacing[1] - TARGET_SPACING[1]) > 0.01;
+                         Math.abs(currentSpacing[1] - TARGET_SPACING[1]) > 0.01 ||
+                         (TARGET_SPACING[2] > 0 && Math.abs(currentSpacing[2] - TARGET_SPACING[2]) > 0.01);
 
   let resampledDims;
   if (needsResample) {
