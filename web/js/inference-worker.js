@@ -625,14 +625,14 @@ async function fetchModel(url, modelName, progressBase, progressSpan) {
 
 // ==================== Chunk Size Resolution ====================
 
-function resolveChunkSize(setting) {
+function resolveChunkSize(setting, numClasses, roiH, roiW) {
   if (typeof setting === 'number' && [1, 2, 4, 8].includes(setting)) {
     return setting;
   }
   // Auto mode: detect device memory
   const deviceMemory = (typeof navigator !== 'undefined' && navigator.deviceMemory) || 4;
   const availableMB = deviceMemory * 1024 * 0.3; // use 30% of total
-  const perChunkMB = 25; // 100 classes × 256 × 256 × 4 bytes ≈ 25 MB
+  const perChunkMB = (numClasses * roiH * roiW * 4) / (1024 * 1024);
   const chunkSize = Math.min(8, Math.max(1, Math.floor(availableMB / perChunkMB)));
   return chunkSize;
 }
@@ -643,13 +643,15 @@ async function runInference(config) {
   const { inputData, settings } = config;
   const {
     modelName = 'musclemap-wholebody.onnx',
+    numClasses: numClassesSetting,
+    roiSize: roiSizeSetting,
     overlap = 0.5,
     chunkSize: chunkSizeSetting = 'auto',
     modelBaseUrl
   } = settings;
 
-  const NUM_CLASSES = 100;
-  const ROI_H = 256, ROI_W = 256;
+  const NUM_CLASSES = numClassesSetting || 100;
+  const [ROI_H, ROI_W] = roiSizeSetting || [256, 256];
   const TARGET_SPACING = [1.0, 1.0, -1];
   const CROP_MARGIN = 20;
 
@@ -738,7 +740,7 @@ async function runInference(config) {
   const labelVolume = new Uint8Array(cnx * cny * cnz);
   const sliceSize = cnx * cny;
 
-  const resolvedChunkSize = resolveChunkSize(chunkSizeSetting);
+  const resolvedChunkSize = resolveChunkSize(chunkSizeSetting, NUM_CLASSES, ROI_H, ROI_W);
   postLog(`Starting 2D inference: ${cnz} slices, overlap=${overlap}, chunkSize=${resolvedChunkSize}${chunkSizeSetting === 'auto' ? ' (auto)' : ''}`);
   const inferenceStartTime = performance.now();
 

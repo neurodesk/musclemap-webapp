@@ -6,11 +6,12 @@ Usage (from project root):
     python scripts/convert_model.py --checkpoint /path/to/model.pth
     python scripts/convert_model.py --checkpoint /path/to/model.pth --quantize
     python scripts/convert_model.py --checkpoint /path/to/model.pth --output web/models/musclemap-wholebody.onnx
+    python scripts/convert_model.py --checkpoint /path/to/model.pth --out-channels 9 --roi-size 128 --num-res-units 2
 
 Requires:
     pip install torch monai onnx onnxruntime
 
-Input:  PyTorch .pth checkpoint (MONAI 2D UNet, 100 output classes)
+Input:  PyTorch .pth checkpoint (MONAI 2D UNet)
 Output: ONNX model in web/models/
 """
 
@@ -28,7 +29,7 @@ from monai.networks.nets import UNet
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "web", "models")
 
-# MuscleMap model architecture
+# MuscleMap model architecture (defaults for wholebody; overridden by CLI args)
 MODEL_CONFIG = {
     "spatial_dims": 2,
     "in_channels": 1,
@@ -43,9 +44,10 @@ MODEL_CONFIG = {
 
 # ==================== Conversion ====================
 
-def load_model(checkpoint_path):
+def load_model(checkpoint_path, config=None):
     """Load a MONAI UNet model from a PyTorch checkpoint."""
-    model = UNet(**MODEL_CONFIG)
+    cfg = config or MODEL_CONFIG
+    model = UNet(**cfg)
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
 
     # Handle both raw state_dict and checkpoint dict formats
@@ -61,10 +63,10 @@ def load_model(checkpoint_path):
     return model
 
 
-def export_to_onnx(model, output_path, opset_version=17):
+def export_to_onnx(model, output_path, roi_size=256, opset_version=17):
     """Export a PyTorch model to ONNX format."""
     # 2D input: [batch, channel, height, width]
-    dummy_input = torch.randn(1, 1, 256, 256)
+    dummy_input = torch.randn(1, 1, roi_size, roi_size)
 
     torch.onnx.export(
         model,
@@ -94,18 +96,18 @@ def quantize_model(input_path, output_path):
     print(f"  Quantized: {output_path}")
 
 
-def verify_model(onnx_path, pytorch_model=None):
+def verify_model(onnx_path, pytorch_model=None, out_channels=100, roi_size=256):
     """Verify an ONNX model runs correctly and optionally compare to PyTorch."""
     import onnxruntime as ort
 
     session = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
-    dummy = np.random.randn(1, 1, 256, 256).astype(np.float32)
+    dummy = np.random.randn(1, 1, roi_size, roi_size).astype(np.float32)
     result = session.run(None, {"input": dummy})
     output = result[0]
     print(f"  Verified: output shape {output.shape}, "
           f"range [{output.min():.3f}, {output.max():.3f}]")
 
-    expected_shape = (1, 100, 256, 256)
+    expected_shape = (1, out_channels, roi_size, roi_size)
     if output.shape != expected_shape:
         print(f"  WARNING: expected shape {expected_shape}, got {output.shape}")
         return False
@@ -129,6 +131,9 @@ def main():
     parser.add_argument("--checkpoint", required=True, help="Path to PyTorch .pth checkpoint")
     parser.add_argument("--output", default=None, help="Output ONNX path (default: web/models/musclemap-wholebody.onnx)")
     parser.add_argument("--quantize", action="store_true", help="Apply UINT8 dynamic quantization")
+    parser.add_argument("--out-channels", type=int, default=100, help="Number of output channels (default: 100)")
+    parser.add_argument("--roi-size", type=int, default=256, help="ROI size for dummy input (default: 256)")
+    parser.add_argument("--num-res-units", type=int, default=1, help="Number of residual units (default: 1)")
     args = parser.parse_args()
 
     if not os.path.exists(args.checkpoint):
@@ -138,18 +143,22 @@ def main():
     os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
     output_path = args.output or os.path.join(DEFAULT_OUTPUT_DIR, "musclemap-wholebody.onnx")
 
+    # Build model config from CLI args
+    config = {**MODEL_CONFIG, "out_channels": args.out_channels, "num_res_units": args.num_res_units}
+
     print(f"Checkpoint: {args.checkpoint}")
     print(f"Output: {output_path}")
     print(f"Quantize: {args.quantize}")
+    print(f"Architecture: out_channels={args.out_channels}, roi_size={args.roi_size}, num_res_units={args.num_res_units}")
 
     # Load model
     print("\nLoading PyTorch model...")
-    model = load_model(args.checkpoint)
+    model = load_model(args.checkpoint, config)
 
     if args.quantize:
         fp32_path = output_path.replace(".onnx", "-fp32.onnx")
         print("Exporting to ONNX (FP32)...")
-        export_to_onnx(model, fp32_path)
+        export_to_onnx(model, fp32_path, roi_size=args.roi_size)
 
         print("Quantizing to UINT8...")
         quantize_model(fp32_path, output_path)
@@ -161,11 +170,11 @@ def main():
             os.remove(data_file)
     else:
         print("Exporting to ONNX (FP32)...")
-        export_to_onnx(model, output_path)
+        export_to_onnx(model, output_path, roi_size=args.roi_size)
 
     # Verify
     print("Verifying model...")
-    ok = verify_model(output_path, model)
+    ok = verify_model(output_path, model, out_channels=args.out_channels, roi_size=args.roi_size)
 
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
     print(f"\nSize: {size_mb:.1f} MB")

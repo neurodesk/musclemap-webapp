@@ -1,10 +1,11 @@
 /**
  * MuscleMap label definitions.
  *
- * 99 labels (model output indices 1-99), plus background (index 0).
- * Labels are ordered by sorted sparse anatomical value from the MuscleMap config.
- * The model outputs contiguous indices; `value` stores the original sparse anatomical ID.
+ * Per-model label arrays keyed by ONNX filename.
+ * Wholebody uses sparse anatomical values; regional models use sequential values.
  */
+
+// ==================== Wholebody Labels (99 muscles) ====================
 
 export const LABELS = [
   { index: 0, value: 0, region: '', name: 'Background', color: [0, 0, 0, 0] },
@@ -109,6 +110,119 @@ export const LABELS = [
   { index: 99, value: 8162, region: 'leg', name: 'Fibula R', color: null },
 ];
 
+// ==================== Regional Model Labels ====================
+
+const ABDOMEN_LABELS = [
+  { index: 0, value: 0, region: '', name: 'Background', color: [0, 0, 0, 0] },
+  { index: 1, value: 1, region: 'abdomen', name: 'Multifidus R', color: null },
+  { index: 2, value: 2, region: 'abdomen', name: 'Multifidus L', color: null },
+  { index: 3, value: 3, region: 'abdomen', name: 'Erector Spinae R', color: null },
+  { index: 4, value: 4, region: 'abdomen', name: 'Erector Spinae L', color: null },
+  { index: 5, value: 5, region: 'abdomen', name: 'Psoas Major R', color: null },
+  { index: 6, value: 6, region: 'abdomen', name: 'Psoas Major L', color: null },
+  { index: 7, value: 7, region: 'abdomen', name: 'Quadratus Lumborum R', color: null },
+  { index: 8, value: 8, region: 'abdomen', name: 'Quadratus Lumborum L', color: null },
+];
+
+const FOREARM_LABELS = [
+  { index: 0, value: 0, region: '', name: 'Background', color: [0, 0, 0, 0] },
+  { index: 1, value: 1, region: 'forearm', name: 'Other Muscles', color: null },
+  { index: 2, value: 2, region: 'forearm', name: 'Radius', color: null },
+  { index: 3, value: 3, region: 'forearm', name: 'Ulna', color: null },
+  { index: 4, value: 4, region: 'forearm', name: 'Extensor Compartment', color: null },
+  { index: 5, value: 5, region: 'forearm', name: 'Flexor Compartment', color: null },
+];
+
+const LEG_LABELS = [
+  { index: 0, value: 0, region: '', name: 'Background', color: [0, 0, 0, 0] },
+  { index: 1, value: 1, region: 'leg', name: 'Anterior Compartment L', color: null },
+  { index: 2, value: 2, region: 'leg', name: 'Anterior Compartment R', color: null },
+  { index: 3, value: 3, region: 'leg', name: 'Deep Posterior Compartment L', color: null },
+  { index: 4, value: 4, region: 'leg', name: 'Deep Posterior Compartment R', color: null },
+  { index: 5, value: 5, region: 'leg', name: 'Lateral Compartment L', color: null },
+  { index: 6, value: 6, region: 'leg', name: 'Lateral Compartment R', color: null },
+  { index: 7, value: 7, region: 'leg', name: 'Soleus L', color: null },
+  { index: 8, value: 8, region: 'leg', name: 'Soleus R', color: null },
+  { index: 9, value: 9, region: 'leg', name: 'Gastrocnemius L', color: null },
+  { index: 10, value: 10, region: 'leg', name: 'Gastrocnemius R', color: null },
+  { index: 11, value: 11, region: 'leg', name: 'Tibia L', color: null },
+  { index: 12, value: 12, region: 'leg', name: 'Tibia R', color: null },
+  { index: 13, value: 13, region: 'leg', name: 'Fibula L', color: null },
+  { index: 14, value: 14, region: 'leg', name: 'Fibula R', color: null },
+];
+
+const PELVIS_LABELS = [
+  { index: 0, value: 0, region: '', name: 'Background', color: [0, 0, 0, 0] },
+  { index: 1, value: 1, region: 'pelvis', name: 'Gluteus Minimus L', color: null },
+  { index: 2, value: 2, region: 'pelvis', name: 'Gluteus Minimus R', color: null },
+  { index: 3, value: 3, region: 'pelvis', name: 'Gluteus Medius L', color: null },
+  { index: 4, value: 4, region: 'pelvis', name: 'Gluteus Medius R', color: null },
+  { index: 5, value: 5, region: 'pelvis', name: 'Gluteus Maximus L', color: null },
+  { index: 6, value: 6, region: 'pelvis', name: 'Gluteus Maximus R', color: null },
+  { index: 7, value: 7, region: 'pelvis', name: 'Tensor Fasciae Latae L', color: null },
+  { index: 8, value: 8, region: 'pelvis', name: 'Tensor Fasciae Latae R', color: null },
+  { index: 9, value: 9, region: 'pelvis', name: 'Femur L', color: null },
+  { index: 10, value: 10, region: 'pelvis', name: 'Femur R', color: null },
+  { index: 11, value: 11, region: 'pelvis', name: 'Pelvic Girdle L', color: null },
+  { index: 12, value: 12, region: 'pelvis', name: 'Pelvic Girdle R', color: null },
+  { index: 13, value: 13, region: 'pelvis', name: 'Sacrum', color: null },
+];
+
+const THIGH_LABELS = [
+  { index: 0, value: 0, region: '', name: 'Background', color: [0, 0, 0, 0] },
+  { index: 1, value: 1, region: 'thigh', name: 'Vastus Lateralis L', color: null },
+  { index: 2, value: 2, region: 'thigh', name: 'Vastus Lateralis R', color: null },
+  { index: 3, value: 3, region: 'thigh', name: 'Vastus Intermedius L', color: null },
+  { index: 4, value: 4, region: 'thigh', name: 'Vastus Intermedius R', color: null },
+  { index: 5, value: 5, region: 'thigh', name: 'Vastus Medialis L', color: null },
+  { index: 6, value: 6, region: 'thigh', name: 'Vastus Medialis R', color: null },
+  { index: 7, value: 7, region: 'thigh', name: 'Rectus Femoris L', color: null },
+  { index: 8, value: 8, region: 'thigh', name: 'Rectus Femoris R', color: null },
+  { index: 9, value: 9, region: 'thigh', name: 'Sartorius L', color: null },
+  { index: 10, value: 10, region: 'thigh', name: 'Sartorius R', color: null },
+  { index: 11, value: 11, region: 'thigh', name: 'Gracilis L', color: null },
+  { index: 12, value: 12, region: 'thigh', name: 'Gracilis R', color: null },
+  { index: 13, value: 13, region: 'thigh', name: 'Semimembranosus L', color: null },
+  { index: 14, value: 14, region: 'thigh', name: 'Semimembranosus R', color: null },
+  { index: 15, value: 15, region: 'thigh', name: 'Semitendinosus L', color: null },
+  { index: 16, value: 16, region: 'thigh', name: 'Semitendinosus R', color: null },
+  { index: 17, value: 17, region: 'thigh', name: 'Biceps Femoris Long Head L', color: null },
+  { index: 18, value: 18, region: 'thigh', name: 'Biceps Femoris Long Head R', color: null },
+  { index: 19, value: 19, region: 'thigh', name: 'Biceps Femoris Short Head L', color: null },
+  { index: 20, value: 20, region: 'thigh', name: 'Biceps Femoris Short Head R', color: null },
+  { index: 21, value: 21, region: 'thigh', name: 'Adductor Magnus L', color: null },
+  { index: 22, value: 22, region: 'thigh', name: 'Adductor Magnus R', color: null },
+  { index: 23, value: 23, region: 'thigh', name: 'Adductor Longus L', color: null },
+  { index: 24, value: 24, region: 'thigh', name: 'Adductor Longus R', color: null },
+  { index: 25, value: 25, region: 'thigh', name: 'Adductor Brevis L', color: null },
+  { index: 26, value: 26, region: 'thigh', name: 'Adductor Brevis R', color: null },
+  { index: 27, value: 27, region: 'thigh', name: 'Femur L', color: null },
+  { index: 28, value: 28, region: 'thigh', name: 'Femur R', color: null },
+];
+
+// ==================== Model Labels Map ====================
+
+/**
+ * Per-model label arrays keyed by ONNX filename.
+ */
+export const MODEL_LABELS = {
+  'musclemap-wholebody.onnx': LABELS,
+  'musclemap-abdomen.onnx': ABDOMEN_LABELS,
+  'musclemap-forearm.onnx': FOREARM_LABELS,
+  'musclemap-leg.onnx': LEG_LABELS,
+  'musclemap-pelvis.onnx': PELVIS_LABELS,
+  'musclemap-thigh.onnx': THIGH_LABELS,
+};
+
+/**
+ * Get label array for a given model. Falls back to wholebody labels.
+ */
+export function getLabelsForModel(modelName) {
+  return MODEL_LABELS[modelName] || LABELS;
+}
+
+// ==================== Index/Value Mappings (wholebody) ====================
+
 /**
  * Mapping from contiguous model output index to sparse anatomical label value.
  * Used when creating downloadable NIfTI files for compatibility with MuscleMap.
@@ -120,17 +234,7 @@ export const INDEX_TO_VALUE = new Map(LABELS.map(l => [l.index, l.value]));
  */
 export const VALUE_TO_INDEX = new Map(LABELS.map(l => [l.value, l.index]));
 
-/**
- * Generate distinct colors for each label using evenly spaced HSL hues.
- */
-function generateColors() {
-  for (let i = 1; i < LABELS.length; i++) {
-    const hue = ((i - 1) * 360 / 99) % 360;
-    const saturation = 70 + (i % 3) * 10; // 70-90%
-    const lightness = 45 + (i % 5) * 5;   // 45-65%
-    LABELS[i].color = hslToRgba(hue, saturation, lightness);
-  }
-}
+// ==================== Color Generation ====================
 
 function hslToRgba(h, s, l) {
   s /= 100;
@@ -153,36 +257,56 @@ function hslToRgba(h, s, l) {
   ];
 }
 
-// Generate colors on module load
-generateColors();
+/**
+ * Generate distinct colors for a label array using evenly spaced HSL hues.
+ */
+function generateColors(labels) {
+  const numLabels = labels.length - 1; // exclude background
+  for (let i = 1; i < labels.length; i++) {
+    const hue = ((i - 1) * 360 / Math.max(numLabels, 1)) % 360;
+    const saturation = 70 + (i % 3) * 10; // 70-90%
+    const lightness = 45 + (i % 5) * 5;   // 45-65%
+    labels[i].color = hslToRgba(hue, saturation, lightness);
+  }
+}
+
+// Generate colors for all label sets on module load
+for (const labels of Object.values(MODEL_LABELS)) {
+  generateColors(labels);
+}
+
+// ==================== Public API ====================
 
 /**
- * Get label name by index.
+ * Get label name by index (defaults to wholebody labels).
  */
-export function getLabelName(index) {
-  return LABELS[index]?.name || `Label ${index}`;
+export function getLabelName(index, labels) {
+  const labelArray = labels || LABELS;
+  return labelArray[index]?.name || `Label ${index}`;
 }
 
 /**
- * Get label color as [R, G, B, A] (0-255).
+ * Get label color as [R, G, B, A] (0-255) (defaults to wholebody labels).
  */
-export function getLabelColor(index) {
-  return LABELS[index]?.color || [128, 128, 128, 255];
+export function getLabelColor(index, labels) {
+  const labelArray = labels || LABELS;
+  return labelArray[index]?.color || [128, 128, 128, 255];
 }
 
 /**
  * Generate a NiiVue-compatible discrete colormap LUT.
- * Returns an object { R, G, B, A, labels, min, max } for nv.addColormap().
+ * Returns an object { R, G, B, A, min, max } for nv.addColormap().
  */
-export function generateNiivueColormap() {
+export function generateNiivueColormap(labels) {
+  const labelArray = labels || LABELS;
   const size = 256;
   const R = new Array(size).fill(0);
   const G = new Array(size).fill(0);
   const B = new Array(size).fill(0);
   const A = new Array(size).fill(0);
 
-  for (let i = 0; i < LABELS.length && i < size; i++) {
-    const c = LABELS[i].color;
+  for (let i = 0; i < labelArray.length && i < size; i++) {
+    const c = labelArray[i].color;
     if (c) {
       R[i] = c[0];
       G[i] = c[1];
@@ -191,12 +315,13 @@ export function generateNiivueColormap() {
     }
   }
 
-  return { R, G, B, A, min: 0, max: 99 };
+  return { R, G, B, A, min: 0, max: labelArray.length - 1 };
 }
 
 /**
  * Get all non-background labels as array of { index, value, name, region, color }.
  */
-export function getMuscleLabels() {
-  return LABELS.slice(1);
+export function getMuscleLabels(labels) {
+  const labelArray = labels || LABELS;
+  return labelArray.slice(1);
 }

@@ -13,7 +13,7 @@ import { ProgressManager } from './modules/ui/ProgressManager.js';
 import { ModalManager } from './modules/ui/ModalManager.js';
 import { MuscleLegend } from './modules/ui/MuscleLegend.js';
 import * as Config from './app/config.js';
-import { generateNiivueColormap, getLabelName, getLabelColor, getMuscleLabels } from './app/labels.js';
+import { generateNiivueColormap, getLabelName, getLabelColor, getMuscleLabels, getLabelsForModel } from './app/labels.js';
 
 class MuscleMapApp {
   constructor() {
@@ -34,6 +34,7 @@ class MuscleMapApp {
     // State
     this.inputFile = null;
     this.currentResultTab = 'input';
+    this.currentModelName = Config.MODELS[0].name;
 
     this.init();
   }
@@ -493,6 +494,11 @@ class MuscleMapApp {
 
     const file = this.fileIOController.getActiveFile();
 
+    // Get model selection
+    const modelSelect = document.getElementById('modelSelect');
+    const selectedModelName = modelSelect ? modelSelect.value : Config.MODELS[0].name;
+    const modelConfig = Config.MODELS.find(m => m.name === selectedModelName) || Config.MODELS[0];
+
     // Get overlap setting
     const overlapSelect = document.getElementById('overlapSelect');
     const overlap = overlapSelect ? parseFloat(overlapSelect.value) : Config.INFERENCE_DEFAULTS.overlap;
@@ -515,10 +521,20 @@ class MuscleMapApp {
     this.disableAllResultTabs();
     this.muscleLegend.hide();
 
+    // Store selected model for result display
+    this.currentModelName = modelConfig.name;
+
+    // Re-register colormap with model-specific labels
+    const modelLabels = getLabelsForModel(modelConfig.name);
+    const colormapData = generateNiivueColormap(modelLabels);
+    this.viewerController.registerMuscleColormap(colormapData);
+
     await this.inferenceExecutor.run({
       inputData,
       settings: {
-        modelName: Config.MODELS[0].name,
+        modelName: modelConfig.name,
+        numClasses: modelConfig.numClasses,
+        roiSize: modelConfig.roiSize,
         overlap,
         chunkSize,
         modelBaseUrl
@@ -584,10 +600,11 @@ class MuscleMapApp {
   }
 
   showDetectedMuscles(labelIndices) {
-    const allLabels = getMuscleLabels();
+    const modelLabels = getLabelsForModel(this.currentModelName);
+    const allLabels = getMuscleLabels(modelLabels);
     const detected = labelIndices.map(idx => {
       const label = allLabels.find(l => l.index === idx);
-      return label || { index: idx, name: getLabelName(idx), color: getLabelColor(idx) };
+      return label || { index: idx, name: getLabelName(idx, modelLabels), color: getLabelColor(idx, modelLabels) };
     });
     this.muscleLegend.show(detected);
   }

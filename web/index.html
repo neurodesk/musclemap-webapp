@@ -85,12 +85,24 @@
       </section>
 
       <!-- Inference Settings -->
-      <section class="sidebar-section collapsed">
+      <section class="sidebar-section">
         <h2 class="section-title" onclick="toggleSection(this.parentElement)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           Inference Settings
         </h2>
         <div class="section-content">
+          <!-- Model -->
+          <div class="param-group">
+            <label class="param-label" for="modelSelect">Model</label>
+            <select id="modelSelect">
+              <option value="musclemap-wholebody.onnx" selected>Whole Body (99 muscles)</option>
+              <option value="musclemap-abdomen.onnx">Abdomen (8 muscles)</option>
+              <option value="musclemap-forearm.onnx">Forearm (5 structures)</option>
+              <option value="musclemap-leg.onnx">Leg (14 structures)</option>
+              <option value="musclemap-pelvis.onnx">Pelvis (13 structures)</option>
+              <option value="musclemap-thigh.onnx">Thigh (28 structures)</option>
+            </select>
+          </div>
           <!-- Overlap -->
           <div class="param-group">
             <label class="param-label" for="overlapSelect">Sliding Window Overlap <span class="info-icon">i<span class="info-tooltip">Higher overlap improves segmentation quality but takes longer. 50% is fast, 90% produces the highest quality.</span></span></label>

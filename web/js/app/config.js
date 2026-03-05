@@ -4,12 +4,15 @@ export const VERSION = '0.1.0';
 export const MODEL_BASE_URL = './models';
 
 export const MODELS = [
-  { name: 'musclemap-wholebody.onnx', label: 'Whole Body' }
+  { name: 'musclemap-wholebody.onnx', label: 'Whole Body', numClasses: 100, roiSize: [256, 256] },
+  { name: 'musclemap-abdomen.onnx', label: 'Abdomen', numClasses: 9, roiSize: [128, 128] },
+  { name: 'musclemap-forearm.onnx', label: 'Forearm', numClasses: 6, roiSize: [256, 256] },
+  { name: 'musclemap-leg.onnx', label: 'Leg', numClasses: 15, roiSize: [128, 128] },
+  { name: 'musclemap-pelvis.onnx', label: 'Pelvis', numClasses: 14, roiSize: [128, 128] },
+  { name: 'musclemap-thigh.onnx', label: 'Thigh', numClasses: 29, roiSize: [128, 128] },
 ];
 
 export const INFERENCE_DEFAULTS = {
-  roiSize: [256, 256],
-  numClasses: 100,
   targetSpacing: [1.0, 1.0, -1], // -1 means keep original z spacing
   cropForegroundMargin: 20,
   overlap: 0.5, // 50% overlap for sliding window
