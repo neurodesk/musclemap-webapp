@@ -49,7 +49,14 @@ export class ViewerController {
       URL.revokeObjectURL(url);
 
       if (this.nv.volumes.length > 1) {
+        // Force display range so uint8 label values map 1:1 to colormap indices.
+        // NiiVue auto-detects range from data (e.g. 0-8), which compresses all
+        // labels into the first few % of the LUT. Setting cal_max=255 ensures
+        // value N maps to colormap entry N.
+        this.nv.volumes[1].cal_min = 0;
+        this.nv.volumes[1].cal_max = 255;
         this.nv.setOpacity(1, opacity);
+        this.nv.updateGLVolume();
       }
 
       this.currentOverlayFile = file;
