@@ -124,7 +124,7 @@ export class InferenceExecutor {
     this.workerInitializing = true;
     this.updateOutput('Initializing ONNX Runtime...');
 
-    this.worker.postMessage({ type: 'init' });
+    this.worker.postMessage({ type: 'init', version: VERSION });
 
     return new Promise((resolve) => {
       const checkReady = setInterval(() => {

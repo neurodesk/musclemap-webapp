@@ -577,9 +577,10 @@ function inverseOrient(data, dims, perm, flip, origDims) {
 
 async function fetchModel(url, modelName, progressBase, progressSpan) {
   const displayName = modelName || url.split('/').pop();
+  const cacheKey = `${url}?v=${self._appVersion || ''}`;
 
   try {
-    const cached = await localforage.getItem(url);
+    const cached = await localforage.getItem(cacheKey);
     if (cached && cached.byteLength > 1000000) {
       postLog(`Model loaded from cache: ${displayName}`);
       postProgress(progressBase + progressSpan, `Cached: ${displayName}`);
@@ -614,7 +615,7 @@ async function fetchModel(url, modelName, progressBase, progressSpan) {
   for (const chunk of chunks) { data.set(chunk, offset); offset += chunk.length; }
 
   try {
-    await localforage.setItem(url, data.buffer);
+    await localforage.setItem(cacheKey, data.buffer);
   } catch (e) {
     postLog('Warning: Could not cache model (storage full?)');
   }
@@ -965,6 +966,7 @@ self.onmessage = async (e) => {
   switch (type) {
     case 'init':
       try {
+        self._appVersion = e.data.version || '';
         ort.env.wasm.numThreads = navigator.hardwareConcurrency > 1 ? 2 : 1;
         ort.env.wasm.wasmPaths = '../wasm/';
 
