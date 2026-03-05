@@ -492,14 +492,33 @@ function perLabelLargestComponent(labelVolume, dims, numLabels) {
   const [nx, ny, nz] = dims;
   const n = nx * ny * nz;
   const result = new Uint8Array(n);
+  const labelCounts = new Int32Array(numLabels + 1);
 
-  for (let label = 1; label <= numLabels; label++) {
-    const mask = new Uint8Array(n);
-    let hasVoxels = false;
-    for (let i = 0; i < n; i++) {
-      if (labelVolume[i] === label) { mask[i] = 1; hasVoxels = true; }
+  for (let i = 0; i < n; i++) {
+    const label = labelVolume[i];
+    if (label > 0 && label <= numLabels) {
+      labelCounts[label]++;
     }
-    if (!hasVoxels) continue;
+  }
+
+  const activeLabels = [];
+  for (let label = 1; label <= numLabels; label++) {
+    if (labelCounts[label] > 0) {
+      activeLabels.push(label);
+    }
+  }
+
+  const totalActive = activeLabels.length;
+  if (totalActive === 0) {
+    return result;
+  }
+
+  for (let activeIdx = 0; activeIdx < totalActive; activeIdx++) {
+    const label = activeLabels[activeIdx];
+    const mask = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if (labelVolume[i] === label) { mask[i] = 1; }
+    }
 
     const { labels: ccLabels, numComponents } = connectedComponents3D(mask, dims);
 
@@ -515,8 +534,11 @@ function perLabelLargestComponent(labelVolume, dims, numLabels) {
       for (let i = 0; i < n; i++) if (ccLabels[i] === best) result[i] = label;
     }
 
-    if (label % 10 === 0) {
-      postProgress(0.85 + 0.10 * (label / numLabels), `Cleaning label ${label}/${numLabels}...`);
+    if (activeIdx % 5 === 0 || activeIdx === totalActive - 1) {
+      postProgress(
+        0.85 + 0.10 * ((activeIdx + 1) / totalActive),
+        `Cleaning label ${activeIdx + 1}/${totalActive}...`
+      );
     }
   }
 
@@ -646,6 +668,11 @@ function resolveChunkSize(setting, numClasses, roiH, roiW) {
   return chunkSize;
 }
 
+function getOptimalWasmThreads() {
+  const hardwareThreads = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
+  return Math.max(1, Math.min(8, hardwareThreads));
+}
+
 // ==================== Main Inference Pipeline ====================
 
 async function runInference(config) {
@@ -664,7 +691,7 @@ async function runInference(config) {
   const useWebGPU = self._useWebGPU && (useWebGPUSetting !== false);
   if (!useWebGPU && self._useWebGPU) {
     // User forced WASM — use max threads
-    const maxThreads = navigator.hardwareConcurrency || 4;
+    const maxThreads = getOptimalWasmThreads();
     ort.env.wasm.numThreads = maxThreads;
     postLog(`Forcing WASM backend with ${maxThreads} threads`);
   }
@@ -809,7 +836,7 @@ async function runInference(config) {
     let accum, weightSum;
 
     if (accumSize <= 100_000_000) {
-      // Full accumulation
+      // Full accumulation — pixel-major layout: accum[pixel * NUM_CLASSES + class]
       accum = new Float32Array(accumSize);
       weightSum = new Float32Array(inferH * inferW);
 
@@ -837,41 +864,39 @@ async function runInference(config) {
         // Run batched inference
         const inputTensor = new ort.Tensor('float32', batchInput, [N, 1, ROI_H, ROI_W]);
         const results = await session.run({ [inputName]: inputTensor });
-        const output = results[outputName].data;
+        const output = results[outputName].data;  // class-major: [N, C, H, W]
         inputTensor.dispose();
 
-        // Accumulate Gaussian-weighted predictions for each tile in chunk
+        // Accumulate Gaussian-weighted predictions (pixel-major) + weight sum in one pass
         const outputPerTile = NUM_CLASSES * patchSize;
         for (let b = 0; b < N; b++) {
           const tile = chunkTiles[b];
           const batchOffset = b * outputPerTile;
 
-          for (let c = 0; c < NUM_CLASSES; c++) {
-            for (let py = 0; py < ROI_H; py++) {
-              for (let px = 0; px < ROI_W; px++) {
-                const gw = gaussianWeights[py * ROI_W + px];
-                const gy = tile.y + py;
-                const gx = tile.x + px;
-                const gIdx = gy * inferW + gx;
-                accum[c * pixelCount + gIdx] += output[batchOffset + c * patchSize + py * ROI_W + px] * gw;
-              }
-            }
-          }
-
           for (let py = 0; py < ROI_H; py++) {
+            const gwRowOff = py * ROI_W;
+            const gyIdx = (tile.y + py) * inferW + tile.x;
             for (let px = 0; px < ROI_W; px++) {
-              weightSum[(tile.y + py) * inferW + (tile.x + px)] += gaussianWeights[py * ROI_W + px];
+              const gw = gaussianWeights[gwRowOff + px];
+              const gIdx = gyIdx + px;
+              weightSum[gIdx] += gw;
+              const accumBase = gIdx * NUM_CLASSES;
+              const outPixel = gwRowOff + px;  // py * ROI_W + px
+              for (let c = 0; c < NUM_CLASSES; c++) {
+                accum[accumBase + c] += output[batchOffset + c * patchSize + outPixel] * gw;
+              }
             }
           }
         }
       }
 
-      // Argmax for this slice
+      // Argmax for this slice — stride-1 access in pixel-major layout
       for (let i = 0; i < pixelCount; i++) {
         if (weightSum[i] === 0) continue;
-        let bestClass = 0, bestVal = -Infinity;
-        for (let c = 0; c < NUM_CLASSES; c++) {
-          const val = accum[c * pixelCount + i];
+        const base = i * NUM_CLASSES;
+        let bestClass = 0, bestVal = accum[base];
+        for (let c = 1; c < NUM_CLASSES; c++) {
+          const val = accum[base + c];
           if (val > bestVal) { bestVal = val; bestClass = c; }
         }
 
@@ -1021,7 +1046,7 @@ self.onmessage = async (e) => {
     case 'init':
       try {
         self._appVersion = e.data.version || '';
-        ort.env.wasm.numThreads = navigator.hardwareConcurrency > 1 ? 2 : 1;
+        ort.env.wasm.numThreads = getOptimalWasmThreads();
         ort.env.wasm.wasmPaths = '../wasm/';
 
         // Detect WebGPU support
@@ -1038,7 +1063,7 @@ self.onmessage = async (e) => {
           }
         }
         if (!self._useWebGPU) {
-          postLog('Using WASM backend (WebGPU not available)');
+          postLog(`Using WASM backend (WebGPU not available, ${ort.env.wasm.numThreads} threads)`);
         }
 
         localforage.config({
