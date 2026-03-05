@@ -1,8 +1,8 @@
 # WASM files (downloaded by setup.sh)
 web/wasm/
 
-# Model files (large binaries)
-web/models/*.onnx
+# Model files - committed for GitHub Pages deployment
+# web/models/*.onnx
 
 # OS files
 .DS_Store
