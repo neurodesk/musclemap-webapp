@@ -1040,10 +1040,10 @@ async function runInference(config) {
   const outputNifti = createOutputNifti(outputLabels, headerBytes, origDims);
   postStageData('segmentation', outputNifti, 'Muscle segmentation');
 
-  // 12. Create downsampled display NIfTI for faster 3D rendering
+  // 12. Create downsampled display NIfTI for faster 3D rendering (only in fast mode)
   const DISPLAY_MAX_DIM = 128;
   const maxDim = Math.max(...origDims);
-  if (maxDim > DISPLAY_MAX_DIM) {
+  if (fastMode && maxDim > DISPLAY_MAX_DIM) {
     const scale = DISPLAY_MAX_DIM / maxDim;
     const displayDims = origDims.map(d => Math.max(1, Math.round(d * scale)));
     const displayLabels = resampleLabelsNearest(outputLabels, origDims, displayDims);
