@@ -1153,43 +1153,23 @@ input[type="range"]:disabled::-moz-range-thumb {
 
 /* Stage Buttons Grid (Results sidebar) */
 .stage-buttons-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-xs);
 }
 
-.stage-item {
+/* Volume Toggle Rows */
+.volume-toggle {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 6px;
 }
 
-.stage-item .stage-btn {
+.volume-toggle .viewer-checkbox {
   flex: 1;
-  padding: var(--space-xs);
-  font-size: 0.7rem;
-  font-weight: 500;
-  color: var(--color-text-muted);
-  background: var(--color-surface-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  white-space: nowrap;
-  text-align: center;
 }
 
-.stage-item .stage-btn:hover {
-  color: var(--color-text);
-  border-color: var(--color-border-light);
-}
-
-.stage-item .stage-btn.active {
-  color: var(--color-primary);
-  background: var(--color-primary-glow);
-  border-color: var(--color-primary);
-}
-
-.stage-item .download-btn {
+.volume-toggle .download-btn {
   padding: var(--space-xs);
   background: var(--color-surface-elevated);
   border: 1px solid var(--color-border);
@@ -1200,16 +1180,21 @@ input[type="range"]:disabled::-moz-range-thumb {
   transition: all var(--transition-fast);
   display: flex;
   align-items: center;
+  margin-left: auto;
 }
 
-.stage-item .download-btn:hover {
+.volume-toggle .download-btn:hover {
   opacity: 1;
   border-color: var(--color-border-light);
 }
 
-.stage-item .download-btn svg {
+.volume-toggle .download-btn svg {
   width: 12px;
   height: 12px;
+}
+
+.volume-toggle .viewer-checkbox:has(input:not(:checked)) {
+  color: var(--color-text-dim);
 }
 
 /* Model Checkbox Group */

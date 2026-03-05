@@ -39,6 +39,9 @@ class MuscleMapApp {
     this.currentModelName = Config.MODELS[0].name;
     this._pendingMetrics = null;
     this._detectedLabels = null;
+    this._overlaySliderValue = 0.5;
+    this._inputVisible = true;
+    this._segmentationVisible = true;
 
     this.init();
   }
@@ -153,7 +156,10 @@ class MuscleMapApp {
     if (opacitySlider) {
       opacitySlider.addEventListener('input', (e) => {
         const val = parseFloat(e.target.value);
-        this.viewerController.setOverlayOpacity(val);
+        this._overlaySliderValue = val;
+        if (this._segmentationVisible) {
+          this.viewerController.setOverlayOpacity(val);
+        }
         const display = document.getElementById('overlayOpacityValue');
         if (display) display.textContent = `${Math.round(val * 100)}%`;
       });
@@ -484,7 +490,6 @@ class MuscleMapApp {
     if (runBtn) runBtn.disabled = false;
 
     this.currentResultTab = 'input';
-    document.querySelectorAll('.stage-btn').forEach(b => b.classList.remove('active'));
     const overlayControl = document.getElementById('overlayControl');
     if (overlayControl) overlayControl.classList.add('hidden');
 
@@ -572,50 +577,89 @@ class MuscleMapApp {
   // ==================== Results ====================
 
   handleStageData(data) {
+    if (data.stage !== 'segmentation') return;
+
     const resultsSection = document.getElementById('resultsSection');
     if (resultsSection) {
       resultsSection.classList.remove('hidden');
       resultsSection.classList.remove('collapsed');
     }
 
-    if (!document.getElementById('stage-item-input')) {
-      this.addStageButton('input');
+    this.addVolumeToggles();
+
+    const result = this.inferenceExecutor.getResult('segmentation');
+    if (result?.file && this.inputFile) {
+      this.viewerController.showResultAsOverlay(this.inputFile, result.file, 'musclemap').then(() => {
+        this.syncWindowControls();
+      });
     }
 
-    this.addStageButton(data.stage);
-
-    // Auto-show segmentation when it arrives
-    if (data.stage === 'segmentation') {
-      this.showResult('segmentation');
-    }
+    const overlayControl = document.getElementById('overlayControl');
+    if (overlayControl) overlayControl.classList.remove('hidden');
   }
 
-  addStageButton(stage) {
+  addVolumeToggles() {
     const container = document.getElementById('stageButtons');
-    if (!container || document.getElementById(`stage-item-${stage}`)) return;
+    if (!container) return;
+    container.innerHTML = '';
 
-    const displayName = Config.STAGE_NAMES[stage] || stage;
+    // Input Image toggle
+    const inputRow = document.createElement('div');
+    inputRow.className = 'volume-toggle';
+    const inputLabel = document.createElement('label');
+    inputLabel.className = 'viewer-checkbox';
+    const inputCb = document.createElement('input');
+    inputCb.type = 'checkbox';
+    inputCb.id = 'toggleInput';
+    inputCb.checked = true;
+    this._inputVisible = true;
+    inputLabel.appendChild(inputCb);
+    inputLabel.appendChild(document.createTextNode('Input Image'));
+    inputRow.appendChild(inputLabel);
+    container.appendChild(inputRow);
 
-    const item = document.createElement('div');
-    item.className = 'stage-item';
-    item.id = `stage-item-${stage}`;
+    // Segmentation toggle
+    const segRow = document.createElement('div');
+    segRow.className = 'volume-toggle';
+    const segLabel = document.createElement('label');
+    segLabel.className = 'viewer-checkbox';
+    const segCb = document.createElement('input');
+    segCb.type = 'checkbox';
+    segCb.id = 'toggleSegmentation';
+    segCb.checked = true;
+    this._segmentationVisible = true;
+    segLabel.appendChild(segCb);
+    segLabel.appendChild(document.createTextNode('Segmentation'));
+    segRow.appendChild(segLabel);
 
-    const showBtn = document.createElement('button');
-    showBtn.className = 'btn stage-btn';
-    showBtn.textContent = displayName;
-    showBtn.addEventListener('click', () => this.showResult(stage));
-    item.appendChild(showBtn);
+    const dlBtn = document.createElement('button');
+    dlBtn.className = 'download-btn';
+    dlBtn.title = 'Download Segmentation';
+    dlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+    dlBtn.addEventListener('click', () => this.inferenceExecutor.downloadStage('segmentation'));
+    segRow.appendChild(dlBtn);
+    container.appendChild(segRow);
 
-    if (stage !== 'input') {
-      const dlBtn = document.createElement('button');
-      dlBtn.className = 'download-btn';
-      dlBtn.title = `Download ${displayName}`;
-      dlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
-      dlBtn.addEventListener('click', () => this.inferenceExecutor.downloadStage(stage));
-      item.appendChild(dlBtn);
+    // Event listeners
+    inputCb.addEventListener('change', (e) => this.toggleInputVisibility(e.target.checked));
+    segCb.addEventListener('change', (e) => this.toggleOverlayVisibility(e.target.checked));
+  }
+
+  toggleInputVisibility(visible) {
+    this._inputVisible = visible;
+    this.viewerController.setBaseOpacity(visible ? 1 : 0);
+  }
+
+  toggleOverlayVisibility(visible) {
+    this._segmentationVisible = visible;
+    const opacitySlider = document.getElementById('overlayOpacity');
+    if (visible) {
+      this.viewerController.setOverlayOpacity(this._overlaySliderValue);
+      if (opacitySlider) opacitySlider.disabled = false;
+    } else {
+      this.viewerController.setOverlayOpacity(0);
+      if (opacitySlider) opacitySlider.disabled = true;
     }
-
-    container.appendChild(item);
   }
 
   showDetectedMuscles(labelIndices) {
@@ -669,39 +713,12 @@ class MuscleMapApp {
     if (statusText) statusText.textContent = 'Error';
   }
 
-  async showResult(stage) {
-    this.currentResultTab = stage;
-
-    document.querySelectorAll('.stage-btn').forEach(b => b.classList.remove('active'));
-    const item = document.getElementById(`stage-item-${stage}`);
-    if (item) {
-      const btn = item.querySelector('.stage-btn');
-      if (btn) btn.classList.add('active');
-    }
-
-    const overlayControl = document.getElementById('overlayControl');
-
-    if (stage === 'input') {
-      if (overlayControl) overlayControl.classList.add('hidden');
-      if (this.inputFile) {
-        await this.viewerController.loadBaseVolume(this.inputFile);
-        this.syncWindowControls();
-      }
-      return;
-    }
-
-    const result = this.inferenceExecutor.getResult(stage);
-    if (!result?.file || !this.inputFile) return;
-
-    if (overlayControl) overlayControl.classList.remove('hidden');
-
-    await this.viewerController.showResultAsOverlay(this.inputFile, result.file, 'musclemap');
-    this.syncWindowControls();
-  }
-
   disableAllResultTabs() {
     const container = document.getElementById('stageButtons');
     if (container) container.innerHTML = '';
+    this._inputVisible = true;
+    this._segmentationVisible = true;
+    this._overlaySliderValue = 0.5;
   }
 
   clearResults() {
@@ -720,6 +737,14 @@ class MuscleMapApp {
 
     const overlayControl = document.getElementById('overlayControl');
     if (overlayControl) overlayControl.classList.add('hidden');
+
+    const opacitySlider = document.getElementById('overlayOpacity');
+    if (opacitySlider) {
+      opacitySlider.disabled = false;
+      opacitySlider.value = 0.5;
+    }
+    const opacityDisplay = document.getElementById('overlayOpacityValue');
+    if (opacityDisplay) opacityDisplay.textContent = '50%';
 
     if (this.inputFile) {
       this.viewerController.loadBaseVolume(this.inputFile);
