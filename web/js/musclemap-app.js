@@ -22,8 +22,8 @@ class MuscleMapApp {
     this.nv = new niivue.Niivue({
       ...Config.VIEWER_CONFIG,
       onLocationChange: (data) => {
-        const el = document.getElementById('intensity');
-        if (el) el.innerHTML = data.string;
+        this._lastLocationData = data;
+        this.updateViewerInfo(data);
       }
     });
 
@@ -42,6 +42,7 @@ class MuscleMapApp {
     this._overlaySliderValue = 0.5;
     this._inputVisible = true;
     this._segmentationVisible = true;
+    this._lastLocationData = null;
 
     this.init();
   }
@@ -112,6 +113,35 @@ class MuscleMapApp {
     this.nv.setSliceType(this.nv.sliceTypeMultiplanar);
     this.nv.setInterpolation(true);
     this.nv.drawScene();
+  }
+
+  // ==================== Viewer Footer ====================
+
+  updateViewerInfo(data) {
+    const primaryEl = document.getElementById('viewerInfoPrimary');
+    if (primaryEl) {
+      primaryEl.textContent = data?.string || '';
+    }
+
+    const labelEl = document.getElementById('viewerInfoLabel');
+    if (labelEl) {
+      labelEl.textContent = this.getOverlayLabelText(data);
+    }
+  }
+
+  getOverlayLabelText(data) {
+    if (!this._segmentationVisible) return '';
+    if (!this.nv?.volumes || this.nv.volumes.length < 2) return '';
+
+    const rawValue = data?.values?.[1]?.value;
+    if (!Number.isFinite(rawValue)) return '';
+
+    const labelIndex = Math.round(rawValue);
+    if (labelIndex <= 0) return '';
+
+    const modelLabels = getLabelsForModel(this.currentModelName);
+    const labelName = getLabelName(labelIndex, modelLabels);
+    return `#${labelIndex} ${labelName}`;
   }
 
   // ==================== Event Listeners ====================
@@ -660,6 +690,7 @@ class MuscleMapApp {
       this.viewerController.setOverlayOpacity(0);
       if (opacitySlider) opacitySlider.disabled = true;
     }
+    this.updateViewerInfo(this._lastLocationData);
   }
 
   showDetectedMuscles(labelIndices) {
@@ -749,6 +780,8 @@ class MuscleMapApp {
     if (this.inputFile) {
       this.viewerController.loadBaseVolume(this.inputFile);
     }
+
+    this.updateViewerInfo(this._lastLocationData);
   }
 
   // ==================== UI Helpers ====================
