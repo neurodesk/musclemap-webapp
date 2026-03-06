@@ -315,7 +315,7 @@ export function generateNiivueColormap(labels) {
     }
   }
 
-  return { R, G, B, A, min: 0, max: labelArray.length - 1 };
+  return { R, G, B, A };
 }
 
 /**
