@@ -57,16 +57,17 @@ class MuscleMapApp {
     if (aboutVersionEl) aboutVersionEl.textContent = `v${Config.VERSION}`;
 
     // Controllers
-    this.fileIOController = new FileIOController({
-      updateOutput: (msg) => this.updateOutput(msg),
-      onFileLoaded: (file) => this.onFileLoaded(file)
-    });
-
     this.dicomController = new DicomController({
       updateOutput: (msg) => this.updateOutput(msg),
       onConversionComplete: (file) => {
-        this.fileIOController.setFileFromDicom(file);
+        this.fileIOController.setFile(file);
       }
+    });
+
+    this.fileIOController = new FileIOController({
+      updateOutput: (msg) => this.updateOutput(msg),
+      onFileLoaded: (file) => this.onFileLoaded(file),
+      onDicomFiles: (files) => this.dicomController.convertFiles(files)
     });
 
     this.viewerController = new ViewerController({
@@ -100,7 +101,6 @@ class MuscleMapApp {
     this.viewerController.registerMuscleColormap(colormapData);
 
     this.setupEventListeners();
-    this.setupInputModeTabs();
     this.setupInfoTooltips();
 
     // Start ONNX initialization in background
@@ -148,20 +148,12 @@ class MuscleMapApp {
   // ==================== Event Listeners ====================
 
   setupEventListeners() {
-    const niftiInput = document.getElementById('niftiInput');
-    if (niftiInput) {
-      niftiInput.addEventListener('change', (e) => this.fileIOController.handleFileInput(e));
+    const fileInput = document.getElementById('fileInput');
+    if (fileInput) {
+      fileInput.addEventListener('change', (e) => this.fileIOController.handleFileInput(e));
     }
 
-    const dicomInput = document.getElementById('dicomInput');
-    if (dicomInput) {
-      dicomInput.addEventListener('change', (e) => {
-        this.dicomController.convertFiles(Array.from(e.target.files));
-      });
-    }
-
-    this.setupDropZone('niftiDropZone', 'nifti');
-    this.setupDropZone('dicomDropZone', 'dicom');
+    this.setupDropZone();
 
     const runBtn = document.getElementById('runSegmentation');
     if (runBtn) runBtn.addEventListener('click', () => this.runSegmentation());
@@ -261,8 +253,8 @@ class MuscleMapApp {
     if (closePrivacy) closePrivacy.addEventListener('click', () => this.privacyModal.close());
   }
 
-  setupDropZone(zoneId, mode) {
-    const zone = document.getElementById(zoneId);
+  setupDropZone() {
+    const zone = document.getElementById('fileDropZone');
     if (!zone) return;
 
     zone.addEventListener('dragover', (e) => {
@@ -278,33 +270,18 @@ class MuscleMapApp {
       e.preventDefault();
       zone.classList.remove('dragover');
 
-      if (mode === 'dicom') {
+      const files = Array.from(e.dataTransfer.files);
+      const hasNifti = files.some(f => FileIOController.isNiftiFile(f));
+
+      if (hasNifti) {
+        const niftiFile = files.find(f => FileIOController.isNiftiFile(f));
+        this.fileIOController.setFile(niftiFile);
+      } else if (e.dataTransfer.items?.length) {
+        // Could be a folder drop (DICOM) - use items API for directory traversal
         this.dicomController.convertDropItems(e.dataTransfer.items);
-      } else {
-        const files = Array.from(e.dataTransfer.files);
-        if (files.length > 0) {
-          this.fileIOController.niftiFile = files[0];
-          this.fileIOController.updateFileListUI('nifti', [files[0]]);
-          this.fileIOController.updateOutput(`Loaded: ${files[0].name}`);
-          this.fileIOController.onFileLoaded(files[0]);
-        }
+      } else if (files.length > 0) {
+        this.fileIOController.handleDroppedFiles(files);
       }
-    });
-  }
-
-  setupInputModeTabs() {
-    document.querySelectorAll('.input-mode-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        const mode = tab.dataset.mode;
-        this.fileIOController.setInputMode(mode);
-
-        document.querySelectorAll('.input-mode-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-
-        document.querySelectorAll('.input-mode-content').forEach(c => c.classList.remove('active'));
-        const content = document.getElementById(`${mode}Mode`);
-        if (content) content.classList.add('active');
-      });
     });
   }
 
@@ -809,12 +786,8 @@ class MuscleMapApp {
     }
   }
 
-  removeFile(type, index) {
-    this.fileIOController.removeFile(type, index);
-  }
-
-  clearFiles(type) {
-    this.fileIOController.clearFiles(type);
+  clearFiles() {
+    this.fileIOController.clearFiles();
   }
 }
 

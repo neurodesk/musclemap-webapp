@@ -670,7 +670,7 @@ function resolveChunkSize(setting, numClasses, roiH, roiW) {
 
 function getOptimalWasmThreads() {
   const hardwareThreads = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
-  return Math.max(1, Math.min(8, hardwareThreads));
+  return Math.max(1, hardwareThreads);
 }
 
 // ==================== Main Inference Pipeline ====================
