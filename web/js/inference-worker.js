@@ -685,7 +685,7 @@ async function runInference(config) {
     chunkSize: chunkSizeSetting = 'auto',
     modelBaseUrl,
     useWebGPU: useWebGPUSetting,
-    fastMode = false
+    sliceThickness = -1
   } = settings;
 
   // Override WebGPU setting per-run (user may have toggled the checkbox)
@@ -699,7 +699,7 @@ async function runInference(config) {
 
   const NUM_CLASSES = numClassesSetting || 100;
   const [ROI_H, ROI_W] = roiSizeSetting || [256, 256];
-  const TARGET_SPACING = fastMode ? [1.0, 1.0, 2.0] : [1.0, 1.0, -1];
+  const TARGET_SPACING = [1.0, 1.0, (sliceThickness > 0) ? sliceThickness : -1];
   const CROP_MARGIN = 20;
 
   // 1. Parse NIfTI
@@ -1040,10 +1040,11 @@ async function runInference(config) {
   const outputNifti = createOutputNifti(outputLabels, headerBytes, origDims);
   postStageData('segmentation', outputNifti, 'Muscle segmentation');
 
-  // 12. Create downsampled display NIfTI for faster 3D rendering (only in fast mode)
+  // 12. Create downsampled display NIfTI for faster 3D rendering (when z was resampled)
+  const zWasResampled = TARGET_SPACING[2] > 0 && Math.abs(rasSpacing[2] - TARGET_SPACING[2]) > 0.01;
   const DISPLAY_MAX_DIM = 128;
   const maxDim = Math.max(...origDims);
-  if (fastMode && maxDim > DISPLAY_MAX_DIM) {
+  if (zWasResampled && maxDim > DISPLAY_MAX_DIM) {
     const scale = DISPLAY_MAX_DIM / maxDim;
     const displayDims = origDims.map(d => Math.max(1, Math.round(d * scale)));
     const displayLabels = resampleLabelsNearest(outputLabels, origDims, displayDims);

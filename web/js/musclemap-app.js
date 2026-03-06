@@ -494,6 +494,15 @@ class MuscleMapApp {
     await this.viewerController.loadBaseVolume(file);
     this.syncWindowControls();
 
+    // Set slice thickness default from loaded volume's z-spacing
+    if (this.nv.volumes?.length) {
+      const zSpacing = Math.abs(this.nv.volumes[0].hdr?.pixDims?.[3] || 1);
+      const sliceInput = document.getElementById('sliceThickness');
+      if (sliceInput) {
+        sliceInput.value = parseFloat(zSpacing.toFixed(2));
+      }
+    }
+
     const runBtn = document.getElementById('runSegmentation');
     if (runBtn) runBtn.disabled = false;
 
@@ -536,9 +545,9 @@ class MuscleMapApp {
     const webgpuToggle = document.getElementById('webgpuToggle');
     const useWebGPU = webgpuToggle ? webgpuToggle.checked : true;
 
-    // Get Fast Mode toggle state
-    const fastModeToggle = document.getElementById('fastModeToggle');
-    const fastMode = fastModeToggle ? fastModeToggle.checked : false;
+    // Get slice thickness
+    const sliceThicknessInput = document.getElementById('sliceThickness');
+    const sliceThickness = sliceThicknessInput ? parseFloat(sliceThicknessInput.value) : -1;
 
     const modelBaseUrl = new URL(Config.MODEL_BASE_URL, window.location.href).href;
     const inputData = await file.arrayBuffer();
@@ -574,7 +583,7 @@ class MuscleMapApp {
         chunkSize,
         modelBaseUrl,
         useWebGPU,
-        fastMode
+        sliceThickness
       }
     });
   }
