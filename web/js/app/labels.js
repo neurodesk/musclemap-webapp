@@ -261,11 +261,11 @@ function hslToRgba(h, s, l) {
  * Generate distinct colors for a label array using evenly spaced HSL hues.
  */
 function generateColors(labels) {
-  const numLabels = labels.length - 1; // exclude background
   for (let i = 1; i < labels.length; i++) {
-    const hue = ((i - 1) * 360 / Math.max(numLabels, 1)) % 360;
-    const saturation = 70 + (i % 3) * 10; // 70-90%
-    const lightness = 45 + (i % 5) * 5;   // 45-65%
+    // Golden angle spacing ensures maximally distinct hues for any subset of labels
+    const hue = ((i - 1) * 137.508) % 360;
+    const saturation = 65 + (i % 3) * 12; // 65-89%
+    const lightness = 40 + (i % 5) * 7;   // 40-68%
     labels[i].color = hslToRgba(hue, saturation, lightness);
   }
 }
