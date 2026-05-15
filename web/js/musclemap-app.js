@@ -102,6 +102,7 @@ class MuscleMapApp {
 
     this.setupEventListeners();
     this.setupInfoTooltips();
+    this.setupStartPage();
 
     // Start ONNX initialization in background
     this.inferenceExecutor.initialize();
@@ -251,6 +252,26 @@ class MuscleMapApp {
     if (privacyBtn) privacyBtn.addEventListener('click', () => this.privacyModal.open());
     const closePrivacy = document.getElementById('closePrivacy');
     if (closePrivacy) closePrivacy.addEventListener('click', () => this.privacyModal.close());
+  }
+
+  setupStartPage() {
+    const startPage = document.getElementById('startPage');
+    const enterButton = document.getElementById('enterAppButton');
+    if (!startPage || !enterButton) return;
+
+    enterButton.addEventListener('click', () => {
+      startPage.classList.add('hidden');
+      document.getElementById('fileInput')?.focus();
+    });
+
+    const startPrivacyButton = document.getElementById('startPrivacyButton');
+    if (startPrivacyButton) startPrivacyButton.addEventListener('click', () => this.privacyModal.open());
+
+    const inlinePrivacyButton = document.getElementById('startPrivacyInlineButton');
+    if (inlinePrivacyButton) inlinePrivacyButton.addEventListener('click', () => this.privacyModal.open());
+
+    const startCitationsButton = document.getElementById('startCitationsButton');
+    if (startCitationsButton) startCitationsButton.addEventListener('click', () => this.citationsModal.open());
   }
 
   setupDropZone() {
