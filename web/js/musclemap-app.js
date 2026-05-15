@@ -549,6 +549,10 @@ class MuscleMapApp {
     const sliceThicknessInput = document.getElementById('sliceThickness');
     const sliceThickness = sliceThicknessInput ? parseFloat(sliceThicknessInput.value) : -1;
 
+    // Get low-resolution postprocessing toggle state
+    const lowResToggle = document.getElementById('lowResToggle');
+    const lowRes = lowResToggle ? lowResToggle.checked : Config.INFERENCE_DEFAULTS.lowRes;
+
     const modelBaseUrl = new URL(Config.MODEL_BASE_URL, window.location.href).href;
     const inputData = await file.arrayBuffer();
 
@@ -583,7 +587,8 @@ class MuscleMapApp {
         chunkSize,
         modelBaseUrl,
         useWebGPU,
-        sliceThickness
+        sliceThickness,
+        lowRes
       }
     });
   }

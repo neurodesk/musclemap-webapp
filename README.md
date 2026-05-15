@@ -22,7 +22,7 @@ Open http://localhost:8080 in your browser.
 ## Usage
 
 1. **Upload** a whole-body MRI as DICOM folder or NIfTI file
-2. Optionally adjust the **sliding window overlap** in Inference Settings (50% is fast, 90% is highest quality)
+2. Optionally adjust **sliding window overlap**, **slice thickness**, or enable **Low-Res Mode** in Inference Settings for faster lower-memory postprocessing
 3. Click **Run Segmentation**
 4. View results as a colored overlay; the muscle legend shows all detected muscles
 5. **Download** the segmentation as a NIfTI label map
@@ -94,8 +94,8 @@ musclemap-webapp/
 4. **Normalize** intensity (z-score over nonzero voxels)
 5. **Crop** foreground bounding box + 20-voxel margin
 6. **Slice-by-slice 2D inference** with sliding window and Gaussian weighting
-7. **Per-label connected components** — keep largest component per muscle
-8. **Inverse transform** — uncrop, resample back, reorient to original space
+7. **Inverse transform + cleanup** — default mode inverse-transforms first and then runs connected components at full output resolution; optional Low-Res Mode cleans in the cropped working volume before inverse transforms
+8. **Export** — write the segmentation back to original space for download and display
 
 ## Requirements
 

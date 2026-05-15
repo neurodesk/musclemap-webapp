@@ -17,7 +17,8 @@ export const INFERENCE_DEFAULTS = {
   cropForegroundMargin: 20,
   overlap: 0.5, // 50% overlap for sliding window
   chunkSize: 'auto', // Number of tiles per inference call ('auto' or 1/2/4/8)
-  sliceThickness: -1 // Z-axis spacing in mm; -1 means keep original
+  sliceThickness: -1, // Z-axis spacing in mm; -1 means keep original
+  lowRes: false // When true, run faster lower-resolution postprocessing
 };
 
 export const VIEWER_CONFIG = {

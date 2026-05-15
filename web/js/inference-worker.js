@@ -488,16 +488,41 @@ function connectedComponents3D(binaryMask, dims) {
   return { labels, numComponents: finalLabel };
 }
 
-function perLabelLargestComponent(labelVolume, dims, numLabels) {
+function perLabelLargestComponent(labelVolume, dims, numLabels, progressBase = 0.85, progressSpan = 0.10) {
   const [nx, ny, nz] = dims;
   const n = nx * ny * nz;
   const result = new Uint8Array(n);
   const labelCounts = new Int32Array(numLabels + 1);
+  const minX = new Int32Array(numLabels + 1);
+  const minY = new Int32Array(numLabels + 1);
+  const minZ = new Int32Array(numLabels + 1);
+  const maxX = new Int32Array(numLabels + 1);
+  const maxY = new Int32Array(numLabels + 1);
+  const maxZ = new Int32Array(numLabels + 1);
 
-  for (let i = 0; i < n; i++) {
-    const label = labelVolume[i];
-    if (label > 0 && label <= numLabels) {
-      labelCounts[label]++;
+  minX.fill(nx);
+  minY.fill(ny);
+  minZ.fill(nz);
+  maxX.fill(-1);
+  maxY.fill(-1);
+  maxZ.fill(-1);
+
+  for (let z = 0; z < nz; z++) {
+    const zOff = z * nx * ny;
+    for (let y = 0; y < ny; y++) {
+      const rowOff = zOff + y * nx;
+      for (let x = 0; x < nx; x++) {
+        const label = labelVolume[rowOff + x];
+        if (label <= 0 || label > numLabels) continue;
+
+        labelCounts[label]++;
+        if (x < minX[label]) minX[label] = x;
+        if (x > maxX[label]) maxX[label] = x;
+        if (y < minY[label]) minY[label] = y;
+        if (y > maxY[label]) maxY[label] = y;
+        if (z < minZ[label]) minZ[label] = z;
+        if (z > maxZ[label]) maxZ[label] = z;
+      }
     }
   }
 
@@ -515,28 +540,69 @@ function perLabelLargestComponent(labelVolume, dims, numLabels) {
 
   for (let activeIdx = 0; activeIdx < totalActive; activeIdx++) {
     const label = activeLabels[activeIdx];
-    const mask = new Uint8Array(n);
-    for (let i = 0; i < n; i++) {
-      if (labelVolume[i] === label) { mask[i] = 1; }
+    const boxNx = maxX[label] - minX[label] + 1;
+    const boxNy = maxY[label] - minY[label] + 1;
+    const boxNz = maxZ[label] - minZ[label] + 1;
+    const boxN = boxNx * boxNy * boxNz;
+    const mask = new Uint8Array(boxN);
+
+    for (let z = minZ[label]; z <= maxZ[label]; z++) {
+      const srcZOff = z * nx * ny;
+      const localZOff = (z - minZ[label]) * boxNx * boxNy;
+      for (let y = minY[label]; y <= maxY[label]; y++) {
+        const srcRowOff = srcZOff + y * nx;
+        const localRowOff = localZOff + (y - minY[label]) * boxNx;
+        for (let x = minX[label]; x <= maxX[label]; x++) {
+          if (labelVolume[srcRowOff + x] === label) {
+            mask[localRowOff + (x - minX[label])] = 1;
+          }
+        }
+      }
     }
 
-    const { labels: ccLabels, numComponents } = connectedComponents3D(mask, dims);
+    const { labels: ccLabels, numComponents } = connectedComponents3D(mask, [boxNx, boxNy, boxNz]);
 
     if (numComponents <= 1) {
-      for (let i = 0; i < n; i++) if (mask[i]) result[i] = label;
+      for (let z = minZ[label]; z <= maxZ[label]; z++) {
+        const dstZOff = z * nx * ny;
+        const localZOff = (z - minZ[label]) * boxNx * boxNy;
+        for (let y = minY[label]; y <= maxY[label]; y++) {
+          const dstRowOff = dstZOff + y * nx;
+          const localRowOff = localZOff + (y - minY[label]) * boxNx;
+          for (let x = minX[label]; x <= maxX[label]; x++) {
+            if (mask[localRowOff + (x - minX[label])]) {
+              result[dstRowOff + x] = label;
+            }
+          }
+        }
+      }
     } else {
       const sizes = new Int32Array(numComponents + 1);
-      for (let i = 0; i < n; i++) if (ccLabels[i] > 0) sizes[ccLabels[i]]++;
+      for (let i = 0; i < boxN; i++) {
+        if (ccLabels[i] > 0) sizes[ccLabels[i]]++;
+      }
       let best = 1, bestSize = 0;
       for (let c = 1; c <= numComponents; c++) {
         if (sizes[c] > bestSize) { bestSize = sizes[c]; best = c; }
       }
-      for (let i = 0; i < n; i++) if (ccLabels[i] === best) result[i] = label;
+      for (let z = minZ[label]; z <= maxZ[label]; z++) {
+        const dstZOff = z * nx * ny;
+        const localZOff = (z - minZ[label]) * boxNx * boxNy;
+        for (let y = minY[label]; y <= maxY[label]; y++) {
+          const dstRowOff = dstZOff + y * nx;
+          const localRowOff = localZOff + (y - minY[label]) * boxNx;
+          for (let x = minX[label]; x <= maxX[label]; x++) {
+            if (ccLabels[localRowOff + (x - minX[label])] === best) {
+              result[dstRowOff + x] = label;
+            }
+          }
+        }
+      }
     }
 
     if (activeIdx % 5 === 0 || activeIdx === totalActive - 1) {
       postProgress(
-        0.85 + 0.10 * ((activeIdx + 1) / totalActive),
+        progressBase + progressSpan * ((activeIdx + 1) / totalActive),
         `Cleaning label ${activeIdx + 1}/${totalActive}...`
       );
     }
@@ -601,6 +667,20 @@ function inverseOrient(data, dims, perm, flip, origDims) {
     }
   }
   return result;
+}
+
+function applyInverseTransforms(labels, workingDims, resampledDims, cropOrigin, needsResample, rasDims, isIdentity, perm, flip, origDims) {
+  let outputLabels = uncrop(labels, workingDims, resampledDims, cropOrigin);
+
+  if (needsResample) {
+    outputLabels = resampleLabelsNearest(outputLabels, resampledDims, rasDims);
+  }
+
+  if (!isIdentity) {
+    outputLabels = inverseOrient(outputLabels, rasDims, perm, flip, origDims);
+  }
+
+  return outputLabels;
 }
 
 // ==================== Model Loading ====================
@@ -685,7 +765,8 @@ async function runInference(config) {
     chunkSize: chunkSizeSetting = 'auto',
     modelBaseUrl,
     useWebGPU: useWebGPUSetting,
-    sliceThickness = -1
+    sliceThickness = -1,
+    lowRes = false
   } = settings;
 
   // Override WebGPU setting per-run (user may have toggled the checkbox)
@@ -791,6 +872,7 @@ async function runInference(config) {
 
   const resolvedChunkSize = resolveChunkSize(chunkSizeSetting, NUM_CLASSES, ROI_H, ROI_W);
   postLog(`Starting 2D inference: ${cnz} slices, overlap=${overlap}, chunkSize=${resolvedChunkSize}${chunkSizeSetting === 'auto' ? ' (auto)' : ''}, backend=${useWebGPU ? 'webgpu' : 'wasm'}`);
+  postLog(`Postprocessing mode: ${lowRes ? 'low-res (cleanup before inverse transforms)' : 'full-res (cleanup after inverse transforms)'}`);
   const inferenceStartTime = performance.now();
 
   for (let z = 0; z < cnz; z++) {
@@ -966,24 +1048,23 @@ async function runInference(config) {
   // Release session
   await session.release();
 
-  // 9. Per-label connected components cleanup
-  postProgress(0.83, 'Cleaning labels (connected components)...');
-  postLog('Running per-label connected component cleanup...');
-  const cleanedLabels = perLabelLargestComponent(labelVolume, currentDims, NUM_CLASSES - 1);
+  let outputLabels;
+  if (lowRes) {
+    postProgress(0.83, 'Cleaning labels (low-res)...');
+    postLog('Running connected component cleanup in the low-resolution working volume...');
+    const cleanedLabels = perLabelLargestComponent(labelVolume, currentDims, NUM_CLASSES - 1, 0.83, 0.12);
 
-  // 10. Inverse transform: uncrop
-  postProgress(0.95, 'Inverse transform...');
-  postLog('Applying inverse transforms...');
-  let outputLabels = uncrop(cleanedLabels, currentDims, resampledDims, cropOrigin);
+    postProgress(0.95, 'Inverse transform...');
+    postLog('Applying inverse transforms...');
+    outputLabels = applyInverseTransforms(cleanedLabels, currentDims, resampledDims, cropOrigin, needsResample, rasDims, isIdentity, perm, flip, origDims);
+  } else {
+    postProgress(0.83, 'Inverse transform...');
+    postLog('Applying inverse transforms before connected component cleanup...');
+    const transformedLabels = applyInverseTransforms(labelVolume, currentDims, resampledDims, cropOrigin, needsResample, rasDims, isIdentity, perm, flip, origDims);
 
-  // Inverse resample (nearest neighbor)
-  if (needsResample) {
-    outputLabels = resampleLabelsNearest(outputLabels, resampledDims, rasDims);
-  }
-
-  // Inverse orient
-  if (!isIdentity) {
-    outputLabels = inverseOrient(outputLabels, rasDims, perm, flip, origDims);
+    postProgress(0.90, 'Cleaning labels...');
+    postLog('Running connected component cleanup at full output resolution...');
+    outputLabels = perLabelLargestComponent(transformedLabels, origDims, NUM_CLASSES - 1, 0.90, 0.08);
   }
 
   // Count detected labels
