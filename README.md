@@ -27,7 +27,7 @@ Open http://localhost:8080 in your browser.
 4. View results as a colored overlay; the muscle legend shows all detected muscles
 5. **Download** the segmentation as a NIfTI label map
 
-All processing happens locally in your browser. No data is uploaded.
+All processing happens locally in your browser. Patient data is not uploaded.
 
 ## Model Conversion
 
