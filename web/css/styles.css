@@ -1211,6 +1211,8 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
 }
 
 /* Opacity Control */
@@ -1492,6 +1494,8 @@ input[type="range"]:disabled::-moz-range-thumb {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .header-link {
