@@ -3,6 +3,23 @@
  * Uses vendored @niivue/dcm2niix (WASM) for in-browser conversion.
  */
 
+const DICOM_WASM_INPUT_LIMIT_BYTES = 1024 ** 3;
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return 'unknown size';
+
+  const units = ['B', 'KiB', 'MiB', 'GiB'];
+  let value = bytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
 export class DicomController {
   constructor(options = {}) {
     this.onConversionComplete = options.onConversionComplete || (() => {});
@@ -22,6 +39,8 @@ export class DicomController {
 
   async convertFiles(files) {
     if (!files || files.length === 0) return;
+
+    if (this._warnIfTooLargeForBrowserConversion(files)) return;
 
     this.converting = true;
     this.updateOutput(`Converting ${files.length} DICOM files...`);
@@ -58,6 +77,11 @@ export class DicomController {
 
       if (files.length === 0) {
         this.updateOutput('No DICOM files found in dropped items.');
+        this.converting = false;
+        return;
+      }
+
+      if (this._warnIfTooLargeForBrowserConversion(files)) {
         this.converting = false;
         return;
       }
@@ -101,6 +125,34 @@ export class DicomController {
         resolve();
       }
     });
+  }
+
+  _warnIfTooLargeForBrowserConversion(files) {
+    const fileArray = Array.from(files);
+    const totalBytes = fileArray.reduce((sum, file) => sum + (file.size || 0), 0);
+
+    if (totalBytes < DICOM_WASM_INPUT_LIMIT_BYTES) return false;
+
+    const largestFile = fileArray.reduce(
+      (largest, file) => ((file.size || 0) > (largest?.size || 0) ? file : largest),
+      null
+    );
+    const noun = fileArray.length === 1 ? 'file' : 'files';
+    const largestHint = largestFile
+      ? ` Largest file: ${largestFile.name} (${formatBytes(largestFile.size)}).`
+      : '';
+    const singleFileHint = fileArray.length === 1
+      ? ' Large single-file DICOMs, including Enhanced MR multi-frame objects, should be converted outside the browser.'
+      : '';
+
+    this.updateOutput([
+      `Warning: DICOM conversion skipped because the selected ${noun} total ${formatBytes(totalBytes)}.`,
+      `Browser conversion keeps DICOM input and NIfTI output in WASM memory and is unreliable above ${formatBytes(DICOM_WASM_INPUT_LIMIT_BYTES)}.`,
+      largestHint.trim(),
+      singleFileHint.trim(),
+      'Convert with native dcm2niix first, then load the .nii or .nii.gz file.'
+    ].filter(Boolean).join(' '));
+    return true;
   }
 
   _processResults(resultFiles) {

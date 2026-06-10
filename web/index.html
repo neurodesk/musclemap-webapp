@@ -351,6 +351,10 @@
     <!-- NiiVue canvas -->
     <div class="viewer-canvas-wrapper">
       <canvas id="gl1"></canvas>
+      <canvas id="fallbackCanvas2d" class="fallback-canvas"></canvas>
+      <div class="viewer-unavailable-message" id="viewerUnavailableMessage" hidden>
+        Image preview unavailable: WebGL2 could not initialize. You can still load images, run segmentation, and download results. To restore the interactive 3D viewer, enable hardware acceleration in your browser, then reload.
+      </div>
     </div>
 
     <!-- Intensity info -->
@@ -518,8 +522,11 @@ function toggleSection(section) {
 <!-- NiiVue -->
 <script src="https://unpkg.com/@niivue/niivue@0.68.2/dist/niivue.umd.js"></script>
 
+<!-- NIfTI parsing for non-WebGL preview fallback -->
+<script src="nifti-js/index.js"></script>
+
 <!-- Main app -->
-<script type="module" src="js/musclemap-app.js"></script>
+<script type="module" src="js/musclemap-app.js?v=1.2.18"></script>
 
 <!-- Cloudflare Web Analytics -->
 <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "913c59d6958b4f5aa5a2c67e2e92fb93"}'></script>

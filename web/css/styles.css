@@ -1092,6 +1092,48 @@ select {
   height: 100% !important;
 }
 
+.fallback-canvas {
+  visibility: hidden;
+}
+
+.viewer-unavailable-message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  color: var(--color-text-muted);
+  background: #000;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.viewer-unavailable-message[hidden] {
+  display: none !important;
+}
+
+body.viewer-unavailable .viewer-canvas-wrapper #gl1 {
+  visibility: hidden;
+}
+
+body.viewer-fallback-2d .viewer-canvas-wrapper #fallbackCanvas2d {
+  visibility: visible;
+}
+
+body.viewer-fallback-2d .viewer-unavailable-message {
+  inset: auto var(--space-md) var(--space-md) var(--space-md);
+  display: block;
+  max-width: calc(100% - (2 * var(--space-md)));
+  padding: var(--space-sm) var(--space-md);
+  color: var(--color-text);
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+
 /* Viewer Info Bar */
 .viewer-info {
   display: flex;

@@ -7,13 +7,29 @@ export class ConsoleOutput {
     this.outputElementId = outputElementId;
   }
 
+  getMessageClass(text) {
+    const normalized = String(text).trim().toLowerCase();
+    if (normalized.startsWith('warning:')) return 'warning';
+    if (normalized.startsWith('error:') || normalized.includes('failed')) return 'error';
+    return '';
+  }
+
   log(text) {
     const outputElement = document.getElementById(this.outputElementId);
     if (outputElement) {
       const time = new Date().toLocaleTimeString('en-US', { hour12: false });
       const line = document.createElement('div');
       line.className = 'console-line';
-      line.innerHTML = `<span class="console-time">[${time}]</span> <span class="console-message">${text}</span>`;
+
+      const timeElement = document.createElement('span');
+      timeElement.className = 'console-time';
+      timeElement.textContent = `[${time}]`;
+
+      const messageElement = document.createElement('span');
+      messageElement.className = `console-message ${this.getMessageClass(text)}`.trim();
+      messageElement.textContent = text;
+
+      line.append(timeElement, ' ', messageElement);
       outputElement.appendChild(line);
       outputElement.scrollTop = outputElement.scrollHeight;
     }

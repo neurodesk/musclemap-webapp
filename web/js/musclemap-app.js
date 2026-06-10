@@ -5,18 +5,23 @@
  */
 
 import { FileIOController } from './controllers/FileIOController.js';
-import { DicomController } from './controllers/DicomController.js';
-import { ViewerController } from './controllers/ViewerController.js';
+import { DicomController } from './controllers/DicomController.js?v=1.2.18';
+import { ViewerController } from './controllers/ViewerController.js?v=1.2.18';
 import { InferenceExecutor } from './controllers/InferenceExecutor.js';
-import { ConsoleOutput } from './modules/ui/ConsoleOutput.js';
+import { ConsoleOutput } from './modules/ui/ConsoleOutput.js?v=1.2.18';
 import { ProgressManager } from './modules/ui/ProgressManager.js';
 import { ModalManager } from './modules/ui/ModalManager.js';
 import { MuscleLegend } from './modules/ui/MuscleLegend.js';
 import { MetricsSummary } from './modules/ui/MetricsSummary.js';
+import { FallbackNiftiPreview } from './modules/fallback-nifti-preview.js';
 import * as Config from './app/config.js';
 import { generateNiivueColormap, getLabelName, getLabelColor, getMuscleLabels, getLabelsForModel } from './app/labels.js';
 
 class MuscleMapApp {
+  static VIEWER_UNAVAILABLE_GUIDANCE =
+    'Image preview unavailable: WebGL2 could not initialize. You can still load images, run segmentation, and download results. '
+    + 'To restore the interactive 3D viewer, enable hardware acceleration in your browser (Chrome: Settings > System; details at chrome://gpu), then reload.';
+
   constructor() {
     // NiiVue
     this.nv = new niivue.Niivue({
@@ -43,6 +48,13 @@ class MuscleMapApp {
     this._inputVisible = true;
     this._segmentationVisible = true;
     this._lastLocationData = null;
+    this.viewerAvailable = false;
+    this.viewerUnavailableReason = '';
+    this.fallbackPreview = new FallbackNiftiPreview({
+      canvasId: 'fallbackCanvas2d',
+      messageId: 'viewerUnavailableMessage',
+      updateOutput: (msg) => this.updateOutput(msg)
+    });
 
     this.init();
   }
@@ -95,10 +107,12 @@ class MuscleMapApp {
     const colormapData = generateNiivueColormap();
 
     // Setup
-    await this.setupViewer();
+    const viewerReady = await this.setupViewer();
 
     // Register colormap after viewer is ready
-    this.viewerController.registerMuscleColormap(colormapData);
+    if (viewerReady) {
+      this.viewerController.registerMuscleColormap(colormapData);
+    }
 
     this.setupEventListeners();
     this.setupInfoTooltips();
@@ -109,11 +123,62 @@ class MuscleMapApp {
   }
 
   async setupViewer() {
-    await this.nv.attachTo('gl1');
-    this.nv.setMultiplanarPadPixels(5);
-    this.nv.setSliceType(this.nv.sliceTypeMultiplanar);
-    this.nv.setInterpolation(true);
-    this.nv.drawScene();
+    try {
+      await this.nv.attachTo('gl1');
+      if (!this.nv.gl) {
+        throw new Error('WebGL2 context unavailable after attach.');
+      }
+      this.nv.setMultiplanarPadPixels(5);
+      this.nv.setSliceType(this.nv.sliceTypeMultiplanar);
+      this.nv.setInterpolation(true);
+      this.nv.drawScene();
+      this.viewerAvailable = true;
+      this.setViewerUnavailableMessage('');
+      this.setViewerControlsEnabled(true);
+      return true;
+    } catch (error) {
+      this.disableViewer(error?.message || 'Viewer initialization failed.');
+      return false;
+    }
+  }
+
+  isViewerAvailable() {
+    return this.viewerAvailable && !!this.nv && this.viewerController?.isAvailable?.();
+  }
+
+  isImagePreviewAvailable() {
+    return this.isViewerAvailable() || this.fallbackPreview?.isSupported?.();
+  }
+
+  disableViewer(reason) {
+    this.viewerAvailable = false;
+    this.viewerUnavailableReason = reason;
+    if (this.viewerController) this.viewerController.nv = null;
+    this.fallbackPreview?.setUnavailable(reason);
+    this.setViewerUnavailableMessage(reason);
+    this.setViewerControlsEnabled(false);
+    this.updateViewerInfo({ string: 'Image preview unavailable' });
+    this.updateOutput(`Image preview unavailable: ${reason}`);
+  }
+
+  setViewerUnavailableMessage(reason) {
+    document.body.classList.toggle('viewer-unavailable', !!reason);
+    const message = document.getElementById('viewerUnavailableMessage');
+    if (message) {
+      message.hidden = !reason;
+      if (reason) {
+        message.textContent = MuscleMapApp.VIEWER_UNAVAILABLE_GUIDANCE;
+        message.title = reason;
+      } else {
+        message.title = '';
+      }
+    }
+  }
+
+  setViewerControlsEnabled(enabled) {
+    document.querySelectorAll('.viewer-toolbar button, .viewer-toolbar input, .viewer-toolbar select').forEach(control => {
+      control.disabled = !enabled;
+    });
   }
 
   // ==================== Viewer Footer ====================
@@ -131,6 +196,7 @@ class MuscleMapApp {
   }
 
   getOverlayLabelText(data) {
+    if (!this.isViewerAvailable()) return '';
     if (!this._segmentationVisible) return '';
     if (!this.nv?.volumes || this.nv.volumes.length < 2) return '';
 
@@ -170,6 +236,7 @@ class MuscleMapApp {
 
     document.querySelectorAll('.view-tab[data-view]').forEach(btn => {
       btn.addEventListener('click', () => {
+        if (!this.isViewerAvailable()) return;
         document.querySelectorAll('.view-tab[data-view]').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         this.viewerController.setViewType(btn.dataset.view);
@@ -181,7 +248,7 @@ class MuscleMapApp {
       opacitySlider.addEventListener('input', (e) => {
         const val = parseFloat(e.target.value);
         this._overlaySliderValue = val;
-        if (this._segmentationVisible) {
+        if (this.isViewerAvailable() && this._segmentationVisible) {
           this.viewerController.setOverlayOpacity(val);
         }
         const display = document.getElementById('overlayOpacityValue');
@@ -194,6 +261,7 @@ class MuscleMapApp {
     const interpToggle = document.getElementById('interpolation');
     if (interpToggle) {
       interpToggle.addEventListener('change', (e) => {
+        if (!this.isViewerAvailable()) return;
         this.nv.setInterpolation(!e.target.checked);
         this.nv.drawScene();
       });
@@ -202,6 +270,7 @@ class MuscleMapApp {
     const colorbarToggle = document.getElementById('colorbarToggle');
     if (colorbarToggle) {
       colorbarToggle.addEventListener('change', (e) => {
+        if (!this.isViewerAvailable()) return;
         this.nv.opts.isColorbar = e.target.checked;
         this.nv.drawScene();
       });
@@ -210,6 +279,7 @@ class MuscleMapApp {
     const crosshairToggle = document.getElementById('crosshairToggle');
     if (crosshairToggle) {
       crosshairToggle.addEventListener('change', (e) => {
+        if (!this.isViewerAvailable()) return;
         this.nv.setCrosshairWidth(e.target.checked ? 1 : 0);
       });
     }
@@ -227,7 +297,7 @@ class MuscleMapApp {
     const colormapSelect = document.getElementById('colormapSelect');
     if (colormapSelect) {
       colormapSelect.addEventListener('change', (e) => {
-        if (this.nv.volumes?.length) {
+        if (this.isViewerAvailable() && this.nv.volumes?.length) {
           this.nv.volumes[0].colormap = e.target.value;
           this.nv.updateGLVolume();
         }
@@ -349,7 +419,7 @@ class MuscleMapApp {
     };
 
     const applyFromSliders = () => {
-      if (!this.nv.volumes.length) return;
+      if (!this.isViewerAvailable() || !this.nv.volumes.length) return;
       const vol = this.nv.volumes[0];
       const dataMin = vol.global_min ?? 0;
       const dataMax = vol.global_max ?? 1;
@@ -365,7 +435,7 @@ class MuscleMapApp {
     };
 
     const applyFromInputs = () => {
-      if (!this.nv.volumes.length) return;
+      if (!this.isViewerAvailable() || !this.nv.volumes.length) return;
       const vol = this.nv.volumes[0];
       const newMin = parseFloat(windowMin.value);
       const newMax = parseFloat(windowMax.value);
@@ -395,7 +465,7 @@ class MuscleMapApp {
 
     if (resetBtn) {
       resetBtn.addEventListener('click', () => {
-        if (!this.nv.volumes.length) return;
+        if (!this.isViewerAvailable() || !this.nv.volumes.length) return;
         const vol = this.nv.volumes[0];
         vol.cal_min = vol.global_min ?? 0;
         vol.cal_max = vol.global_max ?? 1;
@@ -406,7 +476,7 @@ class MuscleMapApp {
   }
 
   syncWindowControls() {
-    if (!this.nv.volumes.length) return;
+    if (!this.isViewerAvailable() || !this.nv.volumes.length) return;
     const vol = this.nv.volumes[0];
     const windowMin = document.getElementById('windowMin');
     const windowMax = document.getElementById('windowMax');
@@ -418,7 +488,7 @@ class MuscleMapApp {
   }
 
   syncSlidersToVolume() {
-    if (!this.nv.volumes.length) return;
+    if (!this.isViewerAvailable() || !this.nv.volumes.length) return;
     const vol = this.nv.volumes[0];
     const dataMin = vol.global_min ?? 0;
     const dataMax = vol.global_max ?? 1;
@@ -438,7 +508,20 @@ class MuscleMapApp {
   }
 
   downloadCurrentVolume() {
-    if (!this.nv.volumes?.length) {
+    if (this.viewerController?.isBasePreviewActive?.() && this.inputFile) {
+      const url = URL.createObjectURL(this.inputFile);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = this.inputFile.name || 'volume.nii';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      this.updateOutput(`Downloaded original: ${a.download}`);
+      return;
+    }
+
+    if (!this.isViewerAvailable() || !this.nv.volumes?.length) {
       this.updateOutput('No volume loaded');
       return;
     }
@@ -499,6 +582,10 @@ class MuscleMapApp {
   }
 
   saveScreenshot() {
+    if (!this.isViewerAvailable()) {
+      this.updateOutput('Screenshot unavailable: 3D viewer is disabled');
+      return;
+    }
     let filename = 'musclemap_screenshot.png';
     if (this.nv.volumes?.length) {
       const name = (this.nv.volumes[0].name || 'volume').replace(/\.(nii|nii\.gz)$/i, '');
@@ -512,16 +599,20 @@ class MuscleMapApp {
 
   async onFileLoaded(file) {
     this.inputFile = file;
-    await this.viewerController.loadBaseVolume(file);
-    this.syncWindowControls();
+    if (this.isViewerAvailable()) {
+      await this.viewerController.loadBaseVolume(file);
+      this.syncWindowControls();
 
-    // Set slice thickness default from loaded volume's z-spacing
-    if (this.nv.volumes?.length) {
-      const zSpacing = Math.abs(this.nv.volumes[0].hdr?.pixDims?.[3] || 1);
-      const sliceInput = document.getElementById('sliceThickness');
-      if (sliceInput) {
-        sliceInput.value = parseFloat(zSpacing.toFixed(2));
+      // Set slice thickness default from loaded volume's z-spacing
+      if (this.nv.volumes?.length) {
+        const zSpacing = Math.abs(this.nv.volumes[0].hdr?.pixDims?.[3] || 1);
+        const sliceInput = document.getElementById('sliceThickness');
+        if (sliceInput) {
+          sliceInput.value = parseFloat(zSpacing.toFixed(2));
+        }
       }
+    } else {
+      await this.renderFallbackPreview(file, { stageName: 'Input image' });
     }
 
     const runBtn = document.getElementById('runSegmentation');
@@ -536,6 +627,18 @@ class MuscleMapApp {
     this.metricsSummary.hide();
     this._pendingMetrics = null;
     this._detectedLabels = null;
+  }
+
+  async renderFallbackPreview(file, { stageName = 'Image' } = {}) {
+    if (!this.fallbackPreview?.isSupported?.() || !file) return false;
+    const rendered = await this.fallbackPreview.renderFile(file, {
+      stageName,
+      reason: this.viewerUnavailableReason
+    });
+    if (rendered) {
+      this.updateViewerInfo({ string: `${stageName}: 2D preview` });
+    }
+    return rendered;
   }
 
   // ==================== Inference ====================
@@ -596,7 +699,9 @@ class MuscleMapApp {
     // Re-register colormap with model-specific labels
     const modelLabels = getLabelsForModel(modelConfig.name);
     const colormapData = generateNiivueColormap(modelLabels);
-    this.viewerController.registerMuscleColormap(colormapData);
+    if (this.isViewerAvailable()) {
+      this.viewerController.registerMuscleColormap(colormapData);
+    }
 
     await this.inferenceExecutor.run({
       inputData,
@@ -636,7 +741,7 @@ class MuscleMapApp {
     this.addVolumeToggles();
 
     const overlayControl = document.getElementById('overlayControl');
-    if (overlayControl) overlayControl.classList.remove('hidden');
+    if (overlayControl) overlayControl.classList.toggle('hidden', !this.isViewerAvailable());
   }
 
   addVolumeToggles() {
@@ -653,6 +758,7 @@ class MuscleMapApp {
     inputCb.type = 'checkbox';
     inputCb.id = 'toggleInput';
     inputCb.checked = true;
+    inputCb.disabled = !this.isViewerAvailable() && !this.fallbackPreview?.isSupported?.();
     this._inputVisible = true;
     inputLabel.appendChild(inputCb);
     inputLabel.appendChild(document.createTextNode('Input Image'));
@@ -668,6 +774,7 @@ class MuscleMapApp {
     segCb.type = 'checkbox';
     segCb.id = 'toggleSegmentation';
     segCb.checked = true;
+    segCb.disabled = !this.isViewerAvailable() && !this.fallbackPreview?.isSupported?.();
     this._segmentationVisible = true;
     segLabel.appendChild(segCb);
     segLabel.appendChild(document.createTextNode('Segmentation'));
@@ -688,11 +795,25 @@ class MuscleMapApp {
 
   toggleInputVisibility(visible) {
     this._inputVisible = visible;
+    if (!this.isViewerAvailable()) {
+      if (visible) void this.renderFallbackPreview(this.inputFile, { stageName: 'Input image' });
+      return;
+    }
     this.viewerController.setBaseOpacity(visible ? 1 : 0);
   }
 
   toggleOverlayVisibility(visible) {
     this._segmentationVisible = visible;
+    if (!this.isViewerAvailable()) {
+      if (visible) {
+        const displayResult = this.inferenceExecutor.getResult('segmentation_display');
+        const fullResult = this.inferenceExecutor.getResult('segmentation');
+        const overlayFile = displayResult?.file || fullResult?.file;
+        void this.renderFallbackPreview(overlayFile, { stageName: 'Segmentation' });
+      }
+      this.updateViewerInfo(this._lastLocationData);
+      return;
+    }
     const opacitySlider = document.getElementById('overlayOpacity');
     if (visible) {
       this.viewerController.setOverlayOpacity(this._overlaySliderValue);
@@ -750,9 +871,13 @@ class MuscleMapApp {
     const fullResult = this.inferenceExecutor.getResult('segmentation');
     const overlayFile = displayResult?.file || fullResult?.file;
     if (overlayFile && this.inputFile) {
-      this.viewerController.showResultAsOverlay(this.inputFile, overlayFile, 'musclemap').then(() => {
-        this.syncWindowControls();
-      });
+      if (this.isViewerAvailable()) {
+        this.viewerController.showResultAsOverlay(this.inputFile, overlayFile, 'musclemap').then(() => {
+          this.syncWindowControls();
+        });
+      } else {
+        void this.renderFallbackPreview(overlayFile, { stageName: 'Segmentation' });
+      }
     }
   }
 
@@ -798,8 +923,10 @@ class MuscleMapApp {
     const opacityDisplay = document.getElementById('overlayOpacityValue');
     if (opacityDisplay) opacityDisplay.textContent = '50%';
 
-    if (this.inputFile) {
+    if (this.inputFile && this.isViewerAvailable()) {
       this.viewerController.loadBaseVolume(this.inputFile);
+    } else if (this.inputFile) {
+      void this.renderFallbackPreview(this.inputFile, { stageName: 'Input image' });
     }
 
     this.updateViewerInfo(this._lastLocationData);

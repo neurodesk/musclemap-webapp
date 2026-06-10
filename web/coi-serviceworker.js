@@ -48,13 +48,17 @@ if (typeof window === 'undefined') {
                     }
                     newHeaders.set("Cross-Origin-Opener-Policy", "same-origin");
 
-                    return new Response(response.body, {
+                    const nullBodyStatus = response.status === 204 || response.status === 205 || response.status === 304;
+                    return new Response(nullBodyStatus ? null : response.body, {
                         status: response.status,
                         statusText: response.statusText,
                         headers: newHeaders,
                     });
                 })
-                .catch((e) => console.error(e))
+                .catch((e) => {
+                    console.warn("COOP/COEP Service Worker fetch failed:", e);
+                    return Response.error();
+                })
         );
     });
 

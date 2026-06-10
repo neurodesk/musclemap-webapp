@@ -172,6 +172,209 @@ export function readNiftiImageData(data) {
   return result;
 }
 
+function getGlobalNiftiDecoder() {
+  const root = typeof window !== 'undefined' ? window : globalThis;
+  return root.nifti || null;
+}
+
+function readNiftiHeaderView(buffer) {
+  const view = new DataView(buffer);
+  const littleEndian = view.getInt32(0, true) === 348;
+
+  if (!littleEndian && view.getInt32(0, false) !== 348) {
+    throw new Error('File is not a NIfTI-1 volume');
+  }
+
+  const dims = [];
+  for (let i = 0; i < 8; i++) {
+    dims.push(view.getInt16(40 + i * 2, littleEndian));
+  }
+
+  const datatype = view.getInt16(70, littleEndian);
+  const bitpix = view.getInt16(72, littleEndian);
+  const voxOffset = Math.max(352, Math.ceil(view.getFloat32(108, littleEndian) || 352));
+  const sclSlope = view.getFloat32(112, littleEndian) || 1;
+  const sclInter = view.getFloat32(116, littleEndian) || 0;
+
+  if (dims[0] < 3 || dims[1] <= 0 || dims[2] <= 0 || dims[3] <= 0) {
+    throw new Error('NIfTI volume has invalid dimensions');
+  }
+
+  return {
+    view,
+    littleEndian,
+    dims,
+    nx: dims[1],
+    ny: dims[2],
+    nz: dims[3],
+    datatype,
+    bitpix,
+    voxOffset,
+    sclSlope,
+    sclInter
+  };
+}
+
+function getDatatypeBytes(datatype) {
+  switch (datatype) {
+    case 2:
+    case 256:
+      return 1;
+    case 4:
+    case 512:
+      return 2;
+    case 8:
+    case 16:
+    case 768:
+      return 4;
+    case 64:
+    case 1024:
+    case 1280:
+      return 8;
+    default:
+      throw new Error(`Unsupported NIfTI datatype: ${datatype}`);
+  }
+}
+
+function readRawVoxel(view, byteOffset, datatype, littleEndian) {
+  switch (datatype) {
+    case 2:
+      return view.getUint8(byteOffset);
+    case 4:
+      return view.getInt16(byteOffset, littleEndian);
+    case 8:
+      return view.getInt32(byteOffset, littleEndian);
+    case 16:
+      return view.getFloat32(byteOffset, littleEndian);
+    case 64:
+      return view.getFloat64(byteOffset, littleEndian);
+    case 256:
+      return view.getInt8(byteOffset);
+    case 512:
+      return view.getUint16(byteOffset, littleEndian);
+    case 768:
+      return view.getUint32(byteOffset, littleEndian);
+    case 1024:
+      return Number(view.getBigInt64(byteOffset, littleEndian));
+    case 1280:
+      return Number(view.getBigUint64(byteOffset, littleEndian));
+    default:
+      throw new Error(`Unsupported NIfTI datatype: ${datatype}`);
+  }
+}
+
+function percentile(sortedValues, p) {
+  if (sortedValues.length === 0) return NaN;
+
+  const index = (sortedValues.length - 1) * p;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sortedValues[lower];
+
+  const weight = index - lower;
+  return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
+}
+
+/**
+ * Create a display-only uint8 NIfTI preview from a larger source NIfTI.
+ * The source geometry is preserved, but voxel intensities are robust-scaled
+ * into 0..255 so WebGL viewers can use a smaller texture.
+ */
+export async function createUint8PreviewNiftiFile(file, options = {}) {
+  const {
+    lowerPercentile = 0.005,
+    upperPercentile = 0.995,
+    maxSamples = 262144,
+    suffix = '8bit-preview'
+  } = options;
+
+  let buffer = await file.arrayBuffer();
+  const nifti = getGlobalNiftiDecoder();
+  if (nifti?.isCompressed?.(buffer)) {
+    buffer = nifti.decompress(buffer);
+  }
+
+  const header = readNiftiHeaderView(buffer);
+  const bytesPerVoxel = getDatatypeBytes(header.datatype);
+  const voxelCount = header.nx * header.ny * header.nz;
+  const dataBytes = voxelCount * bytesPerVoxel;
+
+  if (header.voxOffset + dataBytes > buffer.byteLength) {
+    throw new Error('NIfTI image data is truncated');
+  }
+
+  const sampleStride = Math.max(1, Math.floor(voxelCount / maxSamples));
+  const sampleCapacity = Math.ceil(voxelCount / sampleStride);
+  const samples = new Float32Array(sampleCapacity);
+  let sampleCount = 0;
+
+  for (let i = 0; i < voxelCount; i += sampleStride) {
+    const byteOffset = header.voxOffset + i * bytesPerVoxel;
+    const value = readRawVoxel(header.view, byteOffset, header.datatype, header.littleEndian) *
+      header.sclSlope + header.sclInter;
+    if (Number.isFinite(value)) {
+      samples[sampleCount] = value;
+      sampleCount += 1;
+    }
+  }
+
+  if (sampleCount === 0) {
+    throw new Error('No finite voxels found for display preview');
+  }
+
+  const sortedSamples = samples.subarray(0, sampleCount);
+  sortedSamples.sort();
+
+  let sourceMin = percentile(sortedSamples, lowerPercentile);
+  let sourceMax = percentile(sortedSamples, upperPercentile);
+  if (!Number.isFinite(sourceMin) || !Number.isFinite(sourceMax) || sourceMax <= sourceMin) {
+    sourceMin = sortedSamples[0];
+    sourceMax = sortedSamples[sortedSamples.length - 1];
+  }
+  if (sourceMax <= sourceMin) sourceMax = sourceMin + 1;
+
+  const outputBuffer = new ArrayBuffer(header.voxOffset + voxelCount);
+  const inputBytes = new Uint8Array(buffer);
+  const outputBytes = new Uint8Array(outputBuffer);
+  const outputView = new DataView(outputBuffer);
+  outputBytes.set(inputBytes.subarray(0, header.voxOffset));
+
+  outputView.setInt16(70, 2, header.littleEndian); // UINT8
+  outputView.setInt16(72, 8, header.littleEndian);
+  outputView.setFloat32(112, 1, header.littleEndian);
+  outputView.setFloat32(116, 0, header.littleEndian);
+  outputView.setFloat32(124, 255, header.littleEndian);
+  outputView.setFloat32(128, 0, header.littleEndian);
+
+  const outputData = new Uint8Array(outputBuffer, header.voxOffset, voxelCount);
+  const scale = 255 / (sourceMax - sourceMin);
+
+  for (let i = 0; i < voxelCount; i++) {
+    const byteOffset = header.voxOffset + i * bytesPerVoxel;
+    const value = readRawVoxel(header.view, byteOffset, header.datatype, header.littleEndian) *
+      header.sclSlope + header.sclInter;
+    const scaled = Number.isFinite(value) ? Math.round((value - sourceMin) * scale) : 0;
+    outputData[i] = Math.max(0, Math.min(255, scaled));
+  }
+
+  const baseName = (file.name || 'volume').replace(/\.(nii|nii\.gz)$/i, '');
+  const previewFile = new File(
+    [outputBuffer],
+    `${baseName}.${suffix}.nii`,
+    { type: 'application/octet-stream' }
+  );
+
+  return {
+    file: previewFile,
+    sourceMin,
+    sourceMax,
+    dims: [header.nx, header.ny, header.nz],
+    voxelCount,
+    originalBytes: file.size || buffer.byteLength,
+    previewBytes: previewFile.size
+  };
+}
+
 /**
  * Create a NIfTI buffer with uint8 label data.
  */
@@ -193,6 +396,8 @@ export function createUint8Nifti(uint8Data, sourceHeader) {
   destView.setInt16(48, 1, true); // dim[4] = 1
   destView.setFloat32(112, 1, true); // scl_slope = 1
   destView.setFloat32(116, 0, true); // scl_inter = 0
+  destView.setFloat32(124, 255, true); // cal_max
+  destView.setFloat32(128, 0, true); // cal_min
 
   new Uint8Array(buffer, headerSize).set(uint8Data);
   return buffer;
