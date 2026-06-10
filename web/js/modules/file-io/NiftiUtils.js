@@ -263,6 +263,11 @@ function readRawVoxel(view, byteOffset, datatype, littleEndian) {
   }
 }
 
+function readScaledVoxel(header, byteOffset) {
+  return readRawVoxel(header.view, byteOffset, header.datatype, header.littleEndian) *
+    header.sclSlope + header.sclInter;
+}
+
 function percentile(sortedValues, p) {
   if (sortedValues.length === 0) return NaN;
 
@@ -275,16 +280,79 @@ function percentile(sortedValues, p) {
   return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
 }
 
+function computePreviewDims(header, maxBytes, maxDimension) {
+  const voxelCount = header.nx * header.ny * header.nz;
+  const maxVoxels = Math.max(1, maxBytes);
+  const voxelFactor = Math.ceil(Math.cbrt(voxelCount / maxVoxels));
+  const dimensionFactor = Math.ceil(Math.max(header.nx, header.ny, header.nz) / maxDimension);
+  const factor = Math.max(1, voxelFactor, dimensionFactor);
+
+  return {
+    nx: Math.max(1, Math.ceil(header.nx / factor)),
+    ny: Math.max(1, Math.ceil(header.ny / factor)),
+    nz: Math.max(1, Math.ceil(header.nz / factor)),
+    factor
+  };
+}
+
+function updatePreviewHeader(outputView, header, outputDims) {
+  outputView.setInt16(40, 3, header.littleEndian);
+  outputView.setInt16(42, outputDims.nx, header.littleEndian);
+  outputView.setInt16(44, outputDims.ny, header.littleEndian);
+  outputView.setInt16(46, outputDims.nz, header.littleEndian);
+  outputView.setInt16(48, 1, header.littleEndian);
+  outputView.setInt16(50, 1, header.littleEndian);
+  outputView.setInt16(52, 1, header.littleEndian);
+  outputView.setInt16(54, 1, header.littleEndian);
+
+  outputView.setInt16(70, 2, header.littleEndian); // UINT8
+  outputView.setInt16(72, 8, header.littleEndian);
+  outputView.setFloat32(112, 1, header.littleEndian);
+  outputView.setFloat32(116, 0, header.littleEndian);
+  outputView.setFloat32(124, 255, header.littleEndian);
+  outputView.setFloat32(128, 0, header.littleEndian);
+
+  const scales = [
+    header.nx / outputDims.nx,
+    header.ny / outputDims.ny,
+    header.nz / outputDims.nz
+  ];
+
+  for (let i = 0; i < 3; i++) {
+    const pixdimOffset = 80 + i * 4;
+    const pixdim = outputView.getFloat32(pixdimOffset, header.littleEndian);
+    outputView.setFloat32(pixdimOffset, pixdim * scales[i], header.littleEndian);
+  }
+
+  const sformCode = outputView.getInt16(254, header.littleEndian);
+  if (sformCode > 0) {
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 3; col++) {
+        const offset = 280 + row * 16 + col * 4;
+        outputView.setFloat32(
+          offset,
+          outputView.getFloat32(offset, header.littleEndian) * scales[col],
+          header.littleEndian
+        );
+      }
+    }
+  }
+
+  return scales;
+}
+
 /**
  * Create a display-only uint8 NIfTI preview from a larger source NIfTI.
- * The source geometry is preserved, but voxel intensities are robust-scaled
- * into 0..255 so WebGL viewers can use a smaller texture.
+ * Voxel intensities are robust-scaled into 0..255, and very large volumes are
+ * spatially downsampled so WebGL viewers can use a much smaller texture.
  */
 export async function createUint8PreviewNiftiFile(file, options = {}) {
   const {
     lowerPercentile = 0.005,
     upperPercentile = 0.995,
     maxSamples = 262144,
+    maxPreviewBytes = 64 * 1024 ** 2,
+    maxPreviewDimension = 512,
     suffix = '8bit-preview'
   } = options;
 
@@ -298,6 +366,8 @@ export async function createUint8PreviewNiftiFile(file, options = {}) {
   const bytesPerVoxel = getDatatypeBytes(header.datatype);
   const voxelCount = header.nx * header.ny * header.nz;
   const dataBytes = voxelCount * bytesPerVoxel;
+  const outputDims = computePreviewDims(header, maxPreviewBytes, maxPreviewDimension);
+  const outputVoxelCount = outputDims.nx * outputDims.ny * outputDims.nz;
 
   if (header.voxOffset + dataBytes > buffer.byteLength) {
     throw new Error('NIfTI image data is truncated');
@@ -310,8 +380,7 @@ export async function createUint8PreviewNiftiFile(file, options = {}) {
 
   for (let i = 0; i < voxelCount; i += sampleStride) {
     const byteOffset = header.voxOffset + i * bytesPerVoxel;
-    const value = readRawVoxel(header.view, byteOffset, header.datatype, header.littleEndian) *
-      header.sclSlope + header.sclInter;
+    const value = readScaledVoxel(header, byteOffset);
     if (Number.isFinite(value)) {
       samples[sampleCount] = value;
       sampleCount += 1;
@@ -333,28 +402,29 @@ export async function createUint8PreviewNiftiFile(file, options = {}) {
   }
   if (sourceMax <= sourceMin) sourceMax = sourceMin + 1;
 
-  const outputBuffer = new ArrayBuffer(header.voxOffset + voxelCount);
+  const outputBuffer = new ArrayBuffer(header.voxOffset + outputVoxelCount);
   const inputBytes = new Uint8Array(buffer);
   const outputBytes = new Uint8Array(outputBuffer);
   const outputView = new DataView(outputBuffer);
   outputBytes.set(inputBytes.subarray(0, header.voxOffset));
-
-  outputView.setInt16(70, 2, header.littleEndian); // UINT8
-  outputView.setInt16(72, 8, header.littleEndian);
-  outputView.setFloat32(112, 1, header.littleEndian);
-  outputView.setFloat32(116, 0, header.littleEndian);
-  outputView.setFloat32(124, 255, header.littleEndian);
-  outputView.setFloat32(128, 0, header.littleEndian);
-
-  const outputData = new Uint8Array(outputBuffer, header.voxOffset, voxelCount);
+  const scales = updatePreviewHeader(outputView, header, outputDims);
+  const outputData = new Uint8Array(outputBuffer, header.voxOffset, outputVoxelCount);
   const scale = 255 / (sourceMax - sourceMin);
 
-  for (let i = 0; i < voxelCount; i++) {
-    const byteOffset = header.voxOffset + i * bytesPerVoxel;
-    const value = readRawVoxel(header.view, byteOffset, header.datatype, header.littleEndian) *
-      header.sclSlope + header.sclInter;
-    const scaled = Number.isFinite(value) ? Math.round((value - sourceMin) * scale) : 0;
-    outputData[i] = Math.max(0, Math.min(255, scaled));
+  for (let z = 0; z < outputDims.nz; z++) {
+    const srcZ = Math.min(header.nz - 1, Math.floor((z + 0.5) * scales[2]));
+    for (let y = 0; y < outputDims.ny; y++) {
+      const srcY = Math.min(header.ny - 1, Math.floor((y + 0.5) * scales[1]));
+      for (let x = 0; x < outputDims.nx; x++) {
+        const srcX = Math.min(header.nx - 1, Math.floor((x + 0.5) * scales[0]));
+        const inputIndex = srcX + srcY * header.nx + srcZ * header.nx * header.ny;
+        const byteOffset = header.voxOffset + inputIndex * bytesPerVoxel;
+        const value = readScaledVoxel(header, byteOffset);
+        const scaled = Number.isFinite(value) ? Math.round((value - sourceMin) * scale) : 0;
+        outputData[x + y * outputDims.nx + z * outputDims.nx * outputDims.ny] =
+          Math.max(0, Math.min(255, scaled));
+      }
+    }
   }
 
   const baseName = (file.name || 'volume').replace(/\.(nii|nii\.gz)$/i, '');
@@ -368,8 +438,11 @@ export async function createUint8PreviewNiftiFile(file, options = {}) {
     file: previewFile,
     sourceMin,
     sourceMax,
-    dims: [header.nx, header.ny, header.nz],
+    dims: [outputDims.nx, outputDims.ny, outputDims.nz],
+    originalDims: [header.nx, header.ny, header.nz],
+    downsampleFactors: scales,
     voxelCount,
+    previewVoxelCount: outputVoxelCount,
     originalBytes: file.size || buffer.byteLength,
     previewBytes: previewFile.size
   };

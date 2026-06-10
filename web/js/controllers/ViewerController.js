@@ -80,14 +80,17 @@ export class ViewerController {
 
     this.updateOutput(
       `Warning: ${file.name} is ${formatBytes(file.size)}, which can exceed browser GPU texture limits. ` +
-      'Displaying an 8-bit preview; segmentation will use the original NIfTI data.'
+      'Displaying an 8-bit downsampled preview; segmentation will use the original NIfTI data.'
     );
 
     try {
       const preview = await createUint8PreviewNiftiFile(file);
       this.currentBaseDisplayMode = 'uint8-preview';
+      const dimensionSummary = preview.originalDims?.join('x') === preview.dims.join('x')
+        ? preview.dims.join('x')
+        : `${preview.originalDims.join('x')} -> ${preview.dims.join('x')}`;
       this.updateOutput(
-        `Prepared 8-bit display preview (${preview.dims.join('x')}, ` +
+        `Prepared 8-bit display preview (${dimensionSummary}, ` +
         `${formatBytes(preview.previewBytes)}, intensity ${preview.sourceMin.toPrecision(4)}..${preview.sourceMax.toPrecision(4)}).`
       );
       return preview.file;
