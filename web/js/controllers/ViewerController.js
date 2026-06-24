@@ -5,7 +5,7 @@
  * Adapted for MuscleMap's discrete 100-class colormap.
  */
 
-import { createUint8PreviewNiftiFile } from '../modules/file-io/NiftiUtils.js?v=1.2.29';
+import { createUint8PreviewNiftiFile } from '../modules/file-io/NiftiUtils.js?v=1.2.32';
 
 const LARGE_VOLUME_DISPLAY_LIMIT_BYTES = 256 * 1024 ** 2;
 const COMPRESSED_NIFTI_DISPLAY_LIMIT_BYTES = 100 * 1024 ** 2;
@@ -54,17 +54,17 @@ export class ViewerController {
     }
   }
 
-  async loadBaseVolume(file) {
+  async loadBaseVolume(file, { opacity = 1 } = {}) {
     if (!this.isAvailable()) return false;
     let displayFile = null;
     try {
       displayFile = await this._createBaseDisplayFile(file);
-      let loaded = await this._tryLoadDisplayFile(displayFile);
+      let loaded = await this._tryLoadDisplayFile(displayFile, { opacity });
 
       if (!loaded && displayFile === file && this._isNiftiFile(file)) {
         this.updateOutput('Retrying viewer load with an 8-bit display preview...');
         displayFile = await this._createBaseDisplayFile(file, { forcePreview: true });
-        loaded = await this._tryLoadDisplayFile(displayFile);
+        loaded = await this._tryLoadDisplayFile(displayFile, { opacity });
       }
 
       if (!loaded) return false;
@@ -84,13 +84,16 @@ export class ViewerController {
     }
   }
 
-  async _tryLoadDisplayFile(displayFile) {
+  async _tryLoadDisplayFile(displayFile, { opacity = 1 } = {}) {
     this.updateOutput(`Loading ${displayFile.name}...`);
     try {
       await this._withNiivueErrorCapture(async () => {
         const url = URL.createObjectURL(displayFile);
         try {
           await this.nv.loadVolumes([{ url: url, name: displayFile.name }]);
+          if (this.nv.volumes.length > 0) {
+            this.nv.setOpacity(0, opacity);
+          }
           this.nv.drawScene?.();
           await this._nextFrame();
         } finally {
@@ -215,10 +218,40 @@ export class ViewerController {
     }
   }
 
-  async showResultAsOverlay(baseFile, overlayFile, colormap = 'musclemap') {
-    await this.loadBaseVolume(baseFile);
+  async replaceOverlay(file, colormap = 'musclemap', opacity = 0.5) {
+    if (!this.isAvailable()) return false;
+    if (!this.nv.volumes?.length) return false;
+
+    await this.clearOverlayVolumes();
+    await this.loadOverlay(file, colormap, opacity);
+    return true;
+  }
+
+  async clearOverlayVolumes() {
+    if (!this.isAvailable() || !this.nv.volumes?.length) return;
+
+    while (this.nv.volumes.length > 1) {
+      const overlay = this.nv.volumes[this.nv.volumes.length - 1];
+      if (typeof this.nv.removeVolume === 'function') {
+        const before = this.nv.volumes.length;
+        try {
+          await this.nv.removeVolume(overlay);
+        } catch {
+          this.nv.volumes.pop();
+        }
+        if (this.nv.volumes.length === before) this.nv.volumes.pop();
+      } else {
+        this.nv.volumes.pop();
+      }
+    }
+    this.currentOverlayFile = null;
+    this.nv.updateGLVolume?.();
+  }
+
+  async showResultAsOverlay(baseFile, overlayFile, colormap = 'musclemap', { baseOpacity = 1, overlayOpacity = 0.5 } = {}) {
+    await this.loadBaseVolume(baseFile, { opacity: baseOpacity });
     if (overlayFile) {
-      await this.loadOverlay(overlayFile, colormap);
+      await this.loadOverlay(overlayFile, colormap, overlayOpacity);
     }
   }
 

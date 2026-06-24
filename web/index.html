@@ -215,7 +215,42 @@
               <span>Low-Res Mode <span class="info-icon">i<span class="info-tooltip">Runs connected-component cleanup in the cropped working volume before inverse transforms. This is faster and uses less memory, but can slightly reduce final-resolution fidelity. Disabled by default.</span></span></span>
             </label>
           </div>
-          <!-- IMF Metrics -->
+        </div>
+      </section>
+
+      <!-- Run Section -->
+      <section class="sidebar-section">
+        <h2 class="section-title" onclick="toggleSection(this.parentElement)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run
+        </h2>
+        <div class="section-content">
+          <button class="btn btn-primary" id="runSegmentation" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Run Segmentation
+          </button>
+        </div>
+      </section>
+
+      <!-- Postprocessing Section -->
+      <section class="sidebar-section hidden" id="postprocessingSection">
+        <h2 class="section-title" onclick="toggleSection(this.parentElement)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+          Postprocessing
+        </h2>
+        <div class="section-content">
+          <div class="param-group hidden" id="consolidateGroup">
+            <button class="btn btn-secondary btn-sm" id="consolidateSegmentations" type="button" style="width: 100%;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7h12"/><path d="M8 12h12"/><path d="M8 17h12"/><path d="M3 7h.01"/><path d="M3 12h.01"/><path d="M3 17h.01"/></svg>
+              Consolidate Segmentations
+            </button>
+          </div>
+
+          <div class="param-group metrics-controls">
+            <label class="param-label" for="metricsSegmentationSelect">Metrics Segmentation <span class="info-icon">i<span class="info-tooltip">Choose the label map used for volumetric metrics. Consolidate segmentations first if you want metrics on a merged label map.</span></span></label>
+            <select id="metricsSegmentationSelect" disabled></select>
+          </div>
+
           <div class="param-group imf-controls">
             <label class="viewer-checkbox">
               <input type="checkbox" id="imfToggle">
@@ -258,26 +293,15 @@
               </div>
             </div>
           </div>
-        </div>
-      </section>
 
-      <!-- Run Section -->
-      <section class="sidebar-section">
-        <h2 class="section-title" onclick="toggleSection(this.parentElement)">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          Run
-        </h2>
-        <div class="section-content">
-          <div class="param-group hidden" id="consolidateGroup">
-            <label class="viewer-checkbox">
-              <input type="checkbox" id="consolidateSegmentations" checked>
-              <span>Consolidate segmentations <span class="info-icon">i<span class="info-tooltip">When multiple contrasts are segmented, combine label maps voxel-wise before calculating metrics.</span></span></span>
-            </label>
-          </div>
-          <button class="btn btn-primary" id="runSegmentation" disabled>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Run Segmentation
+          <button class="btn btn-primary" id="calculateMetrics" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-7"/></svg>
+            Calculate Metrics
           </button>
+
+          <div class="metrics-summary-inline hidden" id="metricsSummary">
+            <div class="section-content"></div>
+          </div>
         </div>
       </section>
 
@@ -294,15 +318,6 @@
             Clear All
           </button>
         </div>
-      </section>
-
-      <!-- Metrics Summary -->
-      <section class="sidebar-section hidden" id="metricsSummary">
-        <h2 class="section-title" onclick="toggleSection(this.parentElement)">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
-          Metrics
-        </h2>
-        <div class="section-content"></div>
       </section>
 
       <!-- Muscle Legend -->
@@ -581,7 +596,7 @@ function toggleSection(section) {
 <script src="nifti-js/index.js"></script>
 
 <!-- Main app -->
-<script type="module" src="js/musclemap-app.js?v=1.2.29"></script>
+<script type="module" src="js/musclemap-app.js?v=1.2.32"></script>
 
 <!-- Cloudflare Web Analytics -->
 <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "913c59d6958b4f5aa5a2c67e2e92fb93"}'></script>

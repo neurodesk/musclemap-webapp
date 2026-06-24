@@ -25,6 +25,7 @@ export class InferenceExecutor {
     this.results = {};
     this.stageOrder = [];
     this.pendingTask = null;
+    this.currentTaskType = null;
   }
 
   isReady() { return this.workerReady; }
@@ -87,6 +88,7 @@ export class InferenceExecutor {
     this.updateOutput(`Error: ${message}`);
     this.setProgress(0, 'Failed');
     this.running = false;
+    this.currentTaskType = null;
     this.onError(message);
     if (this.pendingTask) {
       this.pendingTask.reject(new Error(message));
@@ -95,8 +97,14 @@ export class InferenceExecutor {
   }
 
   _handleComplete() {
-    this.updateOutput('Segmentation completed successfully!');
+    const completeMessage = this.currentTaskType === 'metricsOnly'
+      ? 'Metrics completed successfully!'
+      : this.currentTaskType === 'consolidateOnly'
+        ? 'Consolidation completed successfully!'
+        : 'Segmentation completed successfully!';
+    this.updateOutput(completeMessage);
     this.running = false;
+    this.currentTaskType = null;
     this.onComplete();
     if (this.pendingTask) {
       this.pendingTask.resolve(true);
@@ -169,8 +177,14 @@ export class InferenceExecutor {
     try {
       await this.initialize();
 
-      this.updateOutput(type === 'run' ? 'Starting segmentation...' : 'Calculating metrics...');
+      const startMessage = type === 'run'
+        ? 'Starting segmentation...'
+        : type === 'consolidateOnly'
+          ? 'Consolidating segmentations...'
+          : 'Calculating metrics...';
+      this.updateOutput(startMessage);
       this.running = true;
+      this.currentTaskType = type;
       this.results = {};
       this.stageOrder = [];
 
@@ -197,10 +211,19 @@ export class InferenceExecutor {
     return this._postTask('metricsOnly', config);
   }
 
+  async consolidateSegmentations(config) {
+    return this._postTask('consolidateOnly', config);
+  }
+
   cancel() {
     if (!this.running) return;
 
-    this.updateOutput('Cancelling segmentation...');
+    const cancelMessage = this.currentTaskType === 'metricsOnly'
+      ? 'Cancelling metrics...'
+      : this.currentTaskType === 'consolidateOnly'
+        ? 'Cancelling consolidation...'
+        : 'Cancelling segmentation...';
+    this.updateOutput(cancelMessage);
 
     if (this.worker) {
       this.worker.terminate();
@@ -210,8 +233,9 @@ export class InferenceExecutor {
     }
 
     this.running = false;
+    this.currentTaskType = null;
     this.setProgress(0, 'Cancelled');
-    this.updateOutput('Segmentation cancelled. Worker will be reinitialized on next run.');
+    this.updateOutput('Processing cancelled. Worker will be reinitialized on next run.');
   }
 
   clearResults() {

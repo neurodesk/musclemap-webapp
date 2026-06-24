@@ -5,10 +5,10 @@
  */
 
 import { FileIOController } from './controllers/FileIOController.js';
-import { DicomController } from './controllers/DicomController.js?v=1.2.29';
-import { ViewerController } from './controllers/ViewerController.js?v=1.2.29';
+import { DicomController } from './controllers/DicomController.js?v=1.2.32';
+import { ViewerController } from './controllers/ViewerController.js?v=1.2.32';
 import { InferenceExecutor } from './controllers/InferenceExecutor.js';
-import { ConsoleOutput } from './modules/ui/ConsoleOutput.js?v=1.2.29';
+import { ConsoleOutput } from './modules/ui/ConsoleOutput.js?v=1.2.32';
 import { ProgressManager } from './modules/ui/ProgressManager.js';
 import { ModalManager } from './modules/ui/ModalManager.js';
 import { MuscleLegend } from './modules/ui/MuscleLegend.js';
@@ -42,13 +42,18 @@ class MuscleMapApp {
     this.inputFile = null;
     this.currentResultTab = 'input';
     this.currentModelName = Config.MODELS[0].name;
+    this.segmentationResults = [];
+    this.activeSegmentationId = null;
     this._pendingMetrics = null;
+    this._metricsSourceId = null;
     this._detectedLabels = null;
+    this._lastDetectedLabelIndices = [];
     this._overlaySliderValue = 0.5;
     this._inputVisible = true;
     this._segmentationVisible = true;
     this._lastLocationData = null;
     this._suppressIntermediateResults = false;
+    this._activeWorkerTask = null;
     this.viewerAvailable = false;
     this.viewerUnavailableReason = '';
     this.fallbackPreview = new FallbackNiftiPreview({
@@ -97,7 +102,7 @@ class MuscleMapApp {
       onComplete: () => this.onInferenceComplete(),
       onError: (msg) => this.onInferenceError(msg),
       onInitialized: () => this.onWorkerInitialized(),
-      onDetectedLabels: (labels) => this.showDetectedMuscles(labels),
+      onDetectedLabels: (labels) => this.handleDetectedLabels(labels),
       onMetrics: (metrics) => this.handleMetrics(metrics)
     });
 
@@ -262,6 +267,20 @@ class MuscleMapApp {
 
     const runBtn = document.getElementById('runSegmentation');
     if (runBtn) runBtn.addEventListener('click', () => this.runSegmentation());
+
+    const consolidateBtn = document.getElementById('consolidateSegmentations');
+    if (consolidateBtn) consolidateBtn.addEventListener('click', () => this.consolidateSegmentations());
+
+    const calculateMetricsBtn = document.getElementById('calculateMetrics');
+    if (calculateMetricsBtn) calculateMetricsBtn.addEventListener('click', () => this.calculateMetrics());
+
+    const metricsSegmentationSelect = document.getElementById('metricsSegmentationSelect');
+    if (metricsSegmentationSelect) {
+      metricsSegmentationSelect.addEventListener('change', () => {
+        this.clearMetricsIfSourceChanged(metricsSegmentationSelect.value);
+        this.syncPostprocessingControls();
+      });
+    }
 
     const cancelBtn = document.getElementById('cancelButton');
     if (cancelBtn) cancelBtn.addEventListener('click', () => this.cancelSegmentation());
@@ -676,12 +695,15 @@ class MuscleMapApp {
     this.muscleLegend.hide();
     this.metricsSummary.hide();
     this._pendingMetrics = null;
+    this._metricsSourceId = null;
     this._detectedLabels = null;
     this.syncImfControls();
+    this.syncPostprocessingControls();
   }
 
   onFilesChanged() {
     this.syncImfControls();
+    this.syncPostprocessingControls();
     const entries = this.fileIOController.getEntries();
     const currentEntry = entries.find(entry => entry.file === this.inputFile) || null;
     const currentIsDisplayable = currentEntry && currentEntry.role !== 'segmentation';
@@ -711,6 +733,33 @@ class MuscleMapApp {
 
   // ==================== Inference ====================
 
+  getSelectedModelConfig() {
+    const modelSelect = document.getElementById('modelSelect');
+    const selectedModelName = modelSelect ? modelSelect.value : Config.MODELS[0].name;
+    return Config.MODELS.find(m => m.name === selectedModelName) || Config.MODELS[0];
+  }
+
+  setWorkerButtonsBusy(busy) {
+    const runBtn = document.getElementById('runSegmentation');
+    const consolidateBtn = document.getElementById('consolidateSegmentations');
+    const calculateMetricsBtn = document.getElementById('calculateMetrics');
+    const cancelBtn = document.getElementById('cancelButton');
+    const consolidationSourceCount = this.getAvailableSegmentationSources()
+      .filter(source => source.type !== 'consolidated')
+      .length;
+
+    if (runBtn) runBtn.disabled = busy || !this.fileIOController.hasValidData();
+    if (consolidateBtn) consolidateBtn.disabled = busy || consolidationSourceCount <= 1;
+    if (calculateMetricsBtn) calculateMetricsBtn.disabled = busy || !this.getSelectedMetricsSegmentationSource();
+    if (cancelBtn) cancelBtn.disabled = !busy;
+  }
+
+  async cloneResultFile(file, name) {
+    if (!file) return null;
+    const buffer = await file.arrayBuffer();
+    return new File([buffer], name || file.name, { type: file.type || 'application/octet-stream' });
+  }
+
   async runSegmentation() {
     const entries = this.fileIOController.getEntries();
     if (entries.length === 0) {
@@ -718,10 +767,7 @@ class MuscleMapApp {
       return;
     }
 
-    // Get model selection
-    const modelSelect = document.getElementById('modelSelect');
-    const selectedModelName = modelSelect ? modelSelect.value : Config.MODELS[0].name;
-    const modelConfig = Config.MODELS.find(m => m.name === selectedModelName) || Config.MODELS[0];
+    const modelConfig = this.getSelectedModelConfig();
 
     // Get overlap setting
     const overlapSelect = document.getElementById('overlapSelect');
@@ -752,24 +798,27 @@ class MuscleMapApp {
       return;
     }
 
-    const imfConfig = this.getImfMetricConfig();
-    if (imfConfig.error) {
-      this.updateOutput(imfConfig.error);
+    if (segmentEntries.length === 0) {
+      this.updateOutput('No contrast selected for segmentation. Uploaded label maps are available for postprocessing.');
+      this.refreshResultsPanel();
+      this.syncPostprocessingControls();
       return;
     }
 
-    const runBtn = document.getElementById('runSegmentation');
-    const cancelBtn = document.getElementById('cancelButton');
-    if (runBtn) runBtn.disabled = true;
-    if (cancelBtn) cancelBtn.disabled = false;
+    this.setWorkerButtonsBusy(true);
 
     // Clear previous
     this.inferenceExecutor.clearResults();
+    this.segmentationResults = [];
+    this.activeSegmentationId = null;
     this.disableAllResultTabs();
     this.muscleLegend.hide();
     this.metricsSummary.hide();
     this._pendingMetrics = null;
+    this._metricsSourceId = null;
     this._detectedLabels = null;
+    this._lastDetectedLabelIndices = [];
+    this.syncPostprocessingControls();
 
     // Store selected model for result display
     this.currentModelName = modelConfig.name;
@@ -792,56 +841,63 @@ class MuscleMapApp {
       useWebGPU,
       sliceThickness,
       lowRes,
+      calculateMetrics: false,
       imfMetrics: { enabled: false }
     };
 
+    this._suppressIntermediateResults = true;
+    this._activeWorkerTask = 'segmentation';
     try {
-      this._suppressIntermediateResults = true;
       for (const entry of segmentEntries) {
         this.updateOutput(`Segmenting ${entry.file.name}...`);
+        this._lastDetectedLabelIndices = [];
         const inputData = await entry.file.arrayBuffer();
         await this.inferenceExecutor.run({ inputData, settings: { ...baseSettings } });
-        const result = this.inferenceExecutor.getResult('segmentation');
-        if (!result?.file) throw new Error(`No segmentation produced for ${entry.file.name}`);
+        const fullResult = this.inferenceExecutor.getResult('segmentation');
+        if (!fullResult?.file) throw new Error(`No segmentation produced for ${entry.file.name}`);
 
         const baseName = (entry.file.name || 'contrast').replace(/\.(nii|nii\.gz)$/i, '');
-        const segBuffer = await result.file.arrayBuffer();
-        generatedSegmentations.push({
-          entry,
-          file: new File([segBuffer], `${baseName}_segmentation.nii`, { type: 'application/octet-stream' })
-        });
+        const displayResult = this.inferenceExecutor.getResult('segmentation_display');
+        const file = await this.cloneResultFile(fullResult.file, `${baseName}_segmentation.nii`);
+        const displayFile = displayResult?.file
+          ? await this.cloneResultFile(displayResult.file, `${baseName}_segmentation_display.nii`)
+          : null;
+        const segmentation = {
+          id: `generated-${Date.now()}-${generatedSegmentations.length}`,
+          type: 'generated',
+          label: `${entry.file.name} segmentation`,
+          file,
+          displayFile,
+          baseFile: entry.file,
+          modelName: modelConfig.name,
+          numClasses: modelConfig.numClasses,
+          labelIndices: [...this._lastDetectedLabelIndices]
+        };
+        generatedSegmentations.push(segmentation);
+        this.segmentationResults.push(segmentation);
       }
 
       this._suppressIntermediateResults = false;
-
-      const consolidate = generatedSegmentations.length > 1 &&
-        !!document.getElementById('consolidateSegmentations')?.checked;
-      const segmentationFiles = generatedSegmentations.length > 0
-        ? (consolidate ? generatedSegmentations.map(item => item.file) : [generatedSegmentations[0].file])
-        : [uploadedSegmentations[0].file];
-
-      const metricsPayload = {
-        segmentationDataList: await Promise.all(segmentationFiles.map(file => file.arrayBuffer())),
-        settings: {
-          numClasses: modelConfig.numClasses,
-          consolidateSegmentations: consolidate,
-          imfMetrics: imfConfig.workerSettings
-        }
-      };
-
-      if (imfConfig.sourceEntry) {
-        metricsPayload.metricSourceData = await imfConfig.sourceEntry.file.arrayBuffer();
-      }
-      if (imfConfig.fatEntry && imfConfig.waterEntry) {
-        metricsPayload.dixonFatData = await imfConfig.fatEntry.file.arrayBuffer();
-        metricsPayload.dixonWaterData = await imfConfig.waterEntry.file.arrayBuffer();
-      }
-
-      await this.inferenceExecutor.calculateMetrics(metricsPayload);
+      this._activeWorkerTask = null;
+      this.updateOutput(`Generated ${generatedSegmentations.length} segmentation${generatedSegmentations.length === 1 ? '' : 's'}.`);
+      this.refreshResultsPanel();
+      this.syncPostprocessingControls();
+      const firstResult = this.segmentationResults[0];
+      if (firstResult) await this.showSegmentationSource(firstResult.id);
+      this.setProgress(1, 'Complete');
+      const statusText = document.getElementById('statusText');
+      if (statusText) statusText.textContent = 'Ready';
     } catch (error) {
       this._suppressIntermediateResults = false;
+      this._activeWorkerTask = null;
       this.updateOutput(`Error: ${error.message}`);
       this.onInferenceError(error.message);
+      return;
+    } finally {
+      this._suppressIntermediateResults = false;
+      this._activeWorkerTask = null;
+      this.setWorkerButtonsBusy(false);
+      this.syncPostprocessingControls();
     }
   }
 
@@ -887,7 +943,7 @@ class MuscleMapApp {
     thresholdControls?.classList.toggle('hidden', mode !== 'threshold');
     dixonControls?.classList.toggle('hidden', mode !== 'dixon');
 
-    this.syncConsolidationControls();
+    this.syncMetricsActionState();
   }
 
   populateEntrySelect(select, entries, emptyLabel) {
@@ -906,8 +962,205 @@ class MuscleMapApp {
 
   syncConsolidationControls() {
     const group = document.getElementById('consolidateGroup');
-    const selectedCount = this.fileIOController.getSegmentEntries().length;
-    if (group) group.classList.toggle('hidden', selectedCount <= 1);
+    const button = document.getElementById('consolidateSegmentations');
+    const sourceCount = this.getAvailableSegmentationSources()
+      .filter(source => source.type !== 'consolidated')
+      .length;
+    if (group) group.classList.toggle('hidden', sourceCount <= 1);
+    if (button) button.disabled = this.inferenceExecutor.isRunning() || sourceCount <= 1;
+  }
+
+  getUploadedSegmentationSources() {
+    return this.fileIOController.getSegmentationEntries().map(entry => ({
+      id: `uploaded-${entry.id}`,
+      type: 'uploaded',
+      label: entry.file.name,
+      file: entry.file,
+      displayFile: null,
+      baseFile: this.fileIOController.getPrimaryImageEntry()?.file || this.inputFile,
+      modelName: this.currentModelName,
+      numClasses: this.getSelectedModelConfig().numClasses,
+      labelIndices: null
+    }));
+  }
+
+  getAvailableSegmentationSources() {
+    return [
+      ...this.segmentationResults,
+      ...this.getUploadedSegmentationSources()
+    ];
+  }
+
+  getSegmentationSourceById(id) {
+    return this.getAvailableSegmentationSources().find(source => source.id === id) || null;
+  }
+
+  getSelectedMetricsSegmentationSource() {
+    const select = document.getElementById('metricsSegmentationSelect');
+    if (!select?.value) return this.getAvailableSegmentationSources()[0] || null;
+    return this.getSegmentationSourceById(select.value);
+  }
+
+  syncPostprocessingControls() {
+    const section = document.getElementById('postprocessingSection');
+    const select = document.getElementById('metricsSegmentationSelect');
+    const sources = this.getAvailableSegmentationSources();
+
+    if (section) section.classList.toggle('hidden', sources.length === 0);
+
+    if (select) {
+      const previous = select.value;
+      select.innerHTML = '';
+      if (sources.length === 0) {
+        select.appendChild(new Option('No segmentation available', ''));
+      } else {
+        for (const source of sources) {
+          select.appendChild(new Option(source.label, source.id));
+        }
+        if (sources.some(source => source.id === previous)) {
+          select.value = previous;
+        } else if (this.activeSegmentationId && sources.some(source => source.id === this.activeSegmentationId)) {
+          select.value = this.activeSegmentationId;
+        } else {
+          select.value = sources[0].id;
+        }
+      }
+      select.disabled = sources.length === 0 || this.inferenceExecutor.isRunning();
+    }
+
+    this.syncConsolidationControls();
+    this.syncMetricsActionState();
+  }
+
+  syncMetricsActionState() {
+    const button = document.getElementById('calculateMetrics');
+    if (!button) return;
+    button.disabled = this.inferenceExecutor.isRunning() || !this.getSelectedMetricsSegmentationSource();
+  }
+
+  clearMetricsIfSourceChanged(sourceId) {
+    if (!this._metricsSourceId || this._metricsSourceId === sourceId) return;
+    this.metricsSummary.hide();
+    this._pendingMetrics = null;
+    this._metricsSourceId = null;
+  }
+
+  async consolidateSegmentations() {
+    const sources = this.getAvailableSegmentationSources()
+      .filter(source => source.type !== 'consolidated');
+    if (sources.length <= 1) {
+      this.updateOutput('At least two segmentation label maps are required for consolidation.');
+      return;
+    }
+
+    const sourceModel = sources.find(source => source.modelName)?.modelName;
+    const modelConfig = Config.MODELS.find(m => m.name === sourceModel) || this.getSelectedModelConfig();
+    const numClasses = Math.max(
+      modelConfig.numClasses,
+      ...sources.map(source => source.numClasses || 0)
+    );
+    this.setWorkerButtonsBusy(true);
+    this.metricsSummary.hide();
+    this._pendingMetrics = null;
+    this._metricsSourceId = null;
+    this._lastDetectedLabelIndices = [];
+    this._activeWorkerTask = 'consolidation';
+    this._suppressIntermediateResults = true;
+
+    try {
+      const payload = {
+        segmentationDataList: await Promise.all(sources.map(source => source.file.arrayBuffer())),
+        settings: {
+          numClasses
+        }
+      };
+      await this.inferenceExecutor.consolidateSegmentations(payload);
+      const result = this.inferenceExecutor.getResult('segmentation');
+      if (!result?.file) throw new Error('No consolidated segmentation produced');
+
+      const file = await this.cloneResultFile(result.file, 'consolidated_segmentation.nii');
+      const consolidated = {
+        id: `consolidated-${Date.now()}`,
+        type: 'consolidated',
+        label: 'Consolidated segmentation',
+        file,
+        displayFile: null,
+        baseFile: sources.find(source => source.baseFile)?.baseFile || this.inputFile,
+        modelName: modelConfig.name,
+        numClasses,
+        labelIndices: [...this._lastDetectedLabelIndices]
+      };
+
+      this.segmentationResults = this.segmentationResults.filter(item => item.type !== 'consolidated');
+      this.segmentationResults.push(consolidated);
+      this._suppressIntermediateResults = false;
+      this._activeWorkerTask = null;
+      this.updateOutput('Consolidated segmentation ready for inspection and metrics.');
+      this.refreshResultsPanel();
+      this.syncPostprocessingControls();
+      await this.showSegmentationSource(consolidated.id);
+      const metricsSelect = document.getElementById('metricsSegmentationSelect');
+      if (metricsSelect) metricsSelect.value = consolidated.id;
+    } catch (error) {
+      this.updateOutput(`Error: ${error.message}`);
+      this.onInferenceError(error.message);
+    } finally {
+      this._suppressIntermediateResults = false;
+      this._activeWorkerTask = null;
+      this.setWorkerButtonsBusy(false);
+      this.syncPostprocessingControls();
+    }
+  }
+
+  async calculateMetrics() {
+    const segmentationSource = this.getSelectedMetricsSegmentationSource();
+    if (!segmentationSource) {
+      this.updateOutput('Choose a segmentation label map before calculating metrics.');
+      return;
+    }
+
+    const imfConfig = this.getImfMetricConfig();
+    if (imfConfig.error) {
+      this.updateOutput(imfConfig.error);
+      return;
+    }
+
+    const modelConfig = Config.MODELS.find(m => m.name === segmentationSource.modelName) || this.getSelectedModelConfig();
+    this.currentModelName = modelConfig.name;
+    this.setWorkerButtonsBusy(true);
+    this.metricsSummary.hide();
+    this._pendingMetrics = null;
+    this._metricsSourceId = null;
+    this._activeWorkerTask = 'metrics';
+
+    try {
+      const payload = {
+        segmentationDataList: [await segmentationSource.file.arrayBuffer()],
+        settings: {
+          numClasses: segmentationSource.numClasses || modelConfig.numClasses,
+          consolidateSegmentations: false,
+          imfMetrics: imfConfig.workerSettings
+        }
+      };
+
+      if (imfConfig.sourceEntry) {
+        payload.metricSourceData = await imfConfig.sourceEntry.file.arrayBuffer();
+      }
+      if (imfConfig.fatEntry && imfConfig.waterEntry) {
+        payload.dixonFatData = await imfConfig.fatEntry.file.arrayBuffer();
+        payload.dixonWaterData = await imfConfig.waterEntry.file.arrayBuffer();
+      }
+
+      await this.inferenceExecutor.calculateMetrics(payload);
+      this.updateOutput('Metrics ready.');
+    } catch (error) {
+      this.updateOutput(`Error: ${error.message}`);
+      this.onInferenceError(error.message);
+    } finally {
+      this._activeWorkerTask = null;
+      this.setWorkerButtonsBusy(false);
+      this.syncPostprocessingControls();
+    }
   }
 
   getEntryById(id) {
@@ -955,10 +1208,13 @@ class MuscleMapApp {
 
   cancelSegmentation() {
     this.inferenceExecutor.cancel();
+    this._suppressIntermediateResults = false;
+    this._activeWorkerTask = null;
     const runBtn = document.getElementById('runSegmentation');
     const cancelBtn = document.getElementById('cancelButton');
     if (runBtn) runBtn.disabled = false;
     if (cancelBtn) cancelBtn.disabled = true;
+    this.syncPostprocessingControls();
   }
 
   // ==================== Results ====================
@@ -979,6 +1235,26 @@ class MuscleMapApp {
     if (overlayControl) overlayControl.classList.toggle('hidden', !this.isViewerAvailable());
   }
 
+  handleDetectedLabels(labelIndices) {
+    this._lastDetectedLabelIndices = Array.isArray(labelIndices) ? [...labelIndices] : [];
+    if (this._suppressIntermediateResults) return;
+    this.showDetectedMuscles(labelIndices);
+  }
+
+  refreshResultsPanel() {
+    const sources = this.getAvailableSegmentationSources();
+    const resultsSection = document.getElementById('resultsSection');
+    if (resultsSection) {
+      resultsSection.classList.toggle('hidden', sources.length === 0);
+      if (sources.length > 0) resultsSection.classList.remove('collapsed');
+    }
+
+    this.addVolumeToggles();
+
+    const overlayControl = document.getElementById('overlayControl');
+    if (overlayControl) overlayControl.classList.toggle('hidden', sources.length === 0 || !this.isViewerAvailable());
+  }
+
   addVolumeToggles() {
     const container = document.getElementById('stageButtons');
     if (!container) return;
@@ -992,15 +1268,17 @@ class MuscleMapApp {
     const inputCb = document.createElement('input');
     inputCb.type = 'checkbox';
     inputCb.id = 'toggleInput';
-    inputCb.checked = true;
+    inputCb.checked = this._inputVisible;
     inputCb.disabled = !this.isViewerAvailable() && !this.fallbackPreview?.isSupported?.();
-    this._inputVisible = true;
     inputLabel.appendChild(inputCb);
     inputLabel.appendChild(document.createTextNode('Input Image'));
     inputRow.appendChild(inputLabel);
     container.appendChild(inputRow);
 
-    // Segmentation toggle
+    inputCb.addEventListener('change', (e) => this.toggleInputVisibility(e.target.checked));
+    const sources = this.getAvailableSegmentationSources();
+    if (sources.length === 0) return;
+
     const segRow = document.createElement('div');
     segRow.className = 'volume-toggle';
     const segLabel = document.createElement('label');
@@ -1008,24 +1286,107 @@ class MuscleMapApp {
     const segCb = document.createElement('input');
     segCb.type = 'checkbox';
     segCb.id = 'toggleSegmentation';
-    segCb.checked = true;
+    segCb.checked = this._segmentationVisible;
     segCb.disabled = !this.isViewerAvailable() && !this.fallbackPreview?.isSupported?.();
-    this._segmentationVisible = true;
     segLabel.appendChild(segCb);
-    segLabel.appendChild(document.createTextNode('Segmentation'));
+    segLabel.appendChild(document.createTextNode('Segmentation overlay'));
     segRow.appendChild(segLabel);
-
-    const dlBtn = document.createElement('button');
-    dlBtn.className = 'download-btn';
-    dlBtn.title = 'Download Segmentation';
-    dlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
-    dlBtn.addEventListener('click', () => this.inferenceExecutor.downloadStage('segmentation'));
-    segRow.appendChild(dlBtn);
     container.appendChild(segRow);
 
-    // Event listeners
-    inputCb.addEventListener('change', (e) => this.toggleInputVisibility(e.target.checked));
+    const resultList = document.createElement('div');
+    resultList.className = 'segmentation-result-list';
+    for (const source of sources) {
+      const row = document.createElement('div');
+      row.className = 'segmentation-result-row';
+
+      const label = document.createElement('label');
+      label.className = 'viewer-checkbox segmentation-result-label';
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'activeSegmentation';
+      radio.value = source.id;
+      radio.checked = source.id === (this.activeSegmentationId || sources[0].id);
+      radio.disabled = !this.isViewerAvailable() && !this.fallbackPreview?.isSupported?.();
+      radio.addEventListener('change', () => {
+        if (radio.checked) void this.showSegmentationSource(source.id);
+      });
+      label.appendChild(radio);
+      label.appendChild(document.createTextNode(source.label));
+
+      const dlBtn = document.createElement('button');
+      dlBtn.className = 'download-btn';
+      dlBtn.type = 'button';
+      dlBtn.title = 'Download segmentation';
+      dlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+      dlBtn.addEventListener('click', () => this.downloadSegmentationSource(source.id));
+
+      row.appendChild(label);
+      row.appendChild(dlBtn);
+      resultList.appendChild(row);
+    }
+    container.appendChild(resultList);
+
     segCb.addEventListener('change', (e) => this.toggleOverlayVisibility(e.target.checked));
+  }
+
+  async showSegmentationSource(id) {
+    const source = this.getSegmentationSourceById(id);
+    if (!source) return;
+
+    this.activeSegmentationId = source.id;
+    this.currentModelName = source.modelName || this.currentModelName;
+    const overlayFile = source.displayFile || source.file;
+    const baseFile = source.baseFile || this.fileIOController.getPrimaryImageEntry()?.file || this.inputFile;
+
+    document.querySelectorAll('input[name="activeSegmentation"]').forEach(input => {
+      input.checked = input.value === source.id;
+    });
+
+    if (this.isViewerAvailable() && baseFile) {
+      const overlayOpacity = this._segmentationVisible ? this._overlaySliderValue : 0;
+      const canReuseHiddenBase = !this._inputVisible && this.nv?.volumes?.length > 0;
+      if (canReuseHiddenBase) {
+        await this.viewerController.replaceOverlay(overlayFile, 'musclemap', overlayOpacity);
+      } else {
+        await this.viewerController.showResultAsOverlay(baseFile, overlayFile, 'musclemap', {
+          baseOpacity: this._inputVisible ? 1 : 0,
+          overlayOpacity
+        });
+      }
+      this.applyVolumeVisibility();
+      this.syncWindowControls();
+    } else {
+      await this.renderFallbackPreview(overlayFile, { stageName: source.label });
+    }
+
+    this.clearMetricsIfSourceChanged(source.id);
+
+    if (source.labelIndices?.length) {
+      this.showDetectedMuscles(source.labelIndices);
+    } else {
+      this._detectedLabels = null;
+      this.muscleLegend.hide();
+    }
+
+    const metricsSelect = document.getElementById('metricsSegmentationSelect');
+    if (metricsSelect && Array.from(metricsSelect.options).some(option => option.value === source.id)) {
+      metricsSelect.value = source.id;
+    }
+    this.updateViewerInfo(this._lastLocationData);
+  }
+
+  downloadSegmentationSource(id) {
+    const source = this.getSegmentationSourceById(id);
+    if (!source?.file) return;
+
+    const url = URL.createObjectURL(source.file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = source.file.name || `${source.id}.nii`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   toggleInputVisibility(visible) {
@@ -1034,17 +1395,33 @@ class MuscleMapApp {
       if (visible) void this.renderFallbackPreview(this.inputFile, { stageName: 'Input image' });
       return;
     }
+    if (visible) {
+      const source = this.getSegmentationSourceById(this.activeSegmentationId);
+      if (source?.baseFile && this.viewerController.getCurrentFile?.() !== source.baseFile) {
+        void this.showSegmentationSource(source.id);
+        return;
+      }
+    }
     this.viewerController.setBaseOpacity(visible ? 1 : 0);
+  }
+
+  applyVolumeVisibility() {
+    if (!this.isViewerAvailable()) return;
+    this.viewerController.setBaseOpacity(this._inputVisible ? 1 : 0);
+    this.viewerController.setOverlayOpacity(this._segmentationVisible ? this._overlaySliderValue : 0);
+
+    const opacitySlider = document.getElementById('overlayOpacity');
+    if (opacitySlider) opacitySlider.disabled = !this._segmentationVisible;
+    this.updateViewerInfo(this._lastLocationData);
   }
 
   toggleOverlayVisibility(visible) {
     this._segmentationVisible = visible;
     if (!this.isViewerAvailable()) {
       if (visible) {
-        const displayResult = this.inferenceExecutor.getResult('segmentation_display');
-        const fullResult = this.inferenceExecutor.getResult('segmentation');
-        const overlayFile = displayResult?.file || fullResult?.file;
-        void this.renderFallbackPreview(overlayFile, { stageName: 'Segmentation' });
+        const source = this.getSegmentationSourceById(this.activeSegmentationId) ||
+          this.getAvailableSegmentationSources()[0];
+        void this.renderFallbackPreview(source?.displayFile || source?.file, { stageName: source?.label || 'Segmentation' });
       }
       this.updateViewerInfo(this._lastLocationData);
       return;
@@ -1079,6 +1456,9 @@ class MuscleMapApp {
   handleMetrics(metrics) {
     if (this._suppressIntermediateResults) return;
     this._pendingMetrics = metrics;
+    this._metricsSourceId = document.getElementById('metricsSegmentationSelect')?.value ||
+      this.activeSegmentationId ||
+      null;
 
     // If detected labels already arrived, update legend with volumes and show summary
     if (this._detectedLabels) {
@@ -1104,13 +1484,22 @@ class MuscleMapApp {
     if (cancelBtn) cancelBtn.disabled = true;
     if (statusText) statusText.textContent = 'Ready';
 
+    if (this._activeWorkerTask === 'metrics') {
+      this.syncPostprocessingControls();
+      return;
+    }
+
     // Load segmentation into viewer: prefer downsampled display version for faster 3D rendering
     const displayResult = this.inferenceExecutor.getResult('segmentation_display');
     const fullResult = this.inferenceExecutor.getResult('segmentation');
     const overlayFile = displayResult?.file || fullResult?.file;
     if (overlayFile && this.inputFile) {
       if (this.isViewerAvailable()) {
-        this.viewerController.showResultAsOverlay(this.inputFile, overlayFile, 'musclemap').then(() => {
+        this.viewerController.showResultAsOverlay(this.inputFile, overlayFile, 'musclemap', {
+          baseOpacity: this._inputVisible ? 1 : 0,
+          overlayOpacity: this._segmentationVisible ? this._overlaySliderValue : 0
+        }).then(() => {
+          this.applyVolumeVisibility();
           this.syncWindowControls();
         });
       } else {
@@ -1138,11 +1527,15 @@ class MuscleMapApp {
 
   clearResults() {
     this.inferenceExecutor.clearResults();
+    this.segmentationResults = [];
+    this.activeSegmentationId = null;
     this.disableAllResultTabs();
     this.muscleLegend.hide();
     this.metricsSummary.hide();
     this._pendingMetrics = null;
+    this._metricsSourceId = null;
     this._detectedLabels = null;
+    this._lastDetectedLabelIndices = [];
 
     const resultsSection = document.getElementById('resultsSection');
     if (resultsSection) {
@@ -1168,6 +1561,7 @@ class MuscleMapApp {
     }
 
     this.updateViewerInfo(this._lastLocationData);
+    this.syncPostprocessingControls();
   }
 
   // ==================== UI Helpers ====================

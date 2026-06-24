@@ -1517,6 +1517,39 @@ input[type="range"]:disabled::-moz-range-thumb {
   color: var(--color-text-dim);
 }
 
+.segmentation-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.segmentation-result-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.segmentation-result-label {
+  min-width: 0;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.segmentation-result-label input {
+  flex-shrink: 0;
+}
+
+.metrics-summary-inline {
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+}
+
 /* Model Checkbox Group */
 .model-checkbox-group {
   display: grid;

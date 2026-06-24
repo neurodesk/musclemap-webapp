@@ -1375,20 +1375,11 @@ function computeVolumetricMetrics(outputLabels, origDims, origVoxelSize, numClas
   };
 }
 
-async function runMetricExtraction(config) {
-  const {
-    segmentationDataList = [],
-    metricSourceData = null,
-    dixonFatData = null,
-    dixonWaterData = null,
-    settings = {}
-  } = config;
-
+function parseSegmentationLabelVolumes(segmentationDataList, emptyMessage) {
   if (!segmentationDataList.length) {
-    throw new Error('No segmentation data provided for metrics');
+    throw new Error(emptyMessage);
   }
 
-  postProgress(0.05, 'Reading segmentation...');
   const parsedSegmentations = segmentationDataList.map(data => parseNiftiInput(data));
   const firstSegmentation = parsedSegmentations[0];
   const labelVolumes = [];
@@ -1399,6 +1390,39 @@ async function runMetricExtraction(config) {
     }
     labelVolumes.push(toLabelArray(parsed.imageData));
   }
+
+  return { firstSegmentation, labelVolumes };
+}
+
+function detectLabelIndices(outputLabels, numClasses) {
+  const labelCounts = new Int32Array(numClasses);
+  for (let i = 0; i < outputLabels.length; i++) {
+    if (outputLabels[i] > 0 && outputLabels[i] < numClasses) {
+      labelCounts[outputLabels[i]]++;
+    }
+  }
+
+  const detectedIndices = [];
+  for (let i = 1; i < numClasses; i++) {
+    if (labelCounts[i] > 0) detectedIndices.push(i);
+  }
+  return detectedIndices;
+}
+
+async function runMetricExtraction(config) {
+  const {
+    segmentationDataList = [],
+    metricSourceData = null,
+    dixonFatData = null,
+    dixonWaterData = null,
+    settings = {}
+  } = config;
+
+  postProgress(0.05, 'Reading segmentation...');
+  const { firstSegmentation, labelVolumes } = parseSegmentationLabelVolumes(
+    segmentationDataList,
+    'No segmentation data provided for metrics'
+  );
 
   const outputLabels = settings.consolidateSegmentations
     ? consolidateLabelVolumes(labelVolumes)
@@ -1476,6 +1500,34 @@ async function runMetricExtraction(config) {
   postComplete();
 }
 
+async function runConsolidationOnly(config) {
+  const {
+    segmentationDataList = [],
+    settings = {}
+  } = config;
+
+  if (segmentationDataList.length < 2) {
+    throw new Error('At least two segmentation label maps are required for consolidation');
+  }
+
+  postProgress(0.05, 'Reading segmentations...');
+  const { firstSegmentation, labelVolumes } = parseSegmentationLabelVolumes(
+    segmentationDataList,
+    'No segmentation data provided for consolidation'
+  );
+
+  postProgress(0.45, 'Consolidating segmentations...');
+  const outputLabels = consolidateLabelVolumes(labelVolumes);
+  const detectedIndices = detectLabelIndices(outputLabels, settings.numClasses || 256);
+  postLog(`Detected ${detectedIndices.length} muscles in consolidated segmentation`);
+  postDetectedLabels(detectedIndices);
+
+  const outputNifti = createOutputNifti(outputLabels, firstSegmentation.headerBytes, firstSegmentation.dims);
+  postStageData('segmentation', outputNifti, 'Consolidated muscle segmentation');
+  postProgress(1.0, 'Complete');
+  postComplete();
+}
+
 // ==================== Main Inference Pipeline ====================
 
 async function runInference(config) {
@@ -1490,6 +1542,7 @@ async function runInference(config) {
     useWebGPU: useWebGPUSetting,
     sliceThickness = -1,
     lowRes = false,
+    calculateMetrics = false,
     imfMetrics = {}
   } = settings;
 
@@ -1806,62 +1859,63 @@ async function runInference(config) {
   postLog(`Detected ${detectedIndices.length} muscles`);
   postDetectedLabels(detectedIndices);
 
-  // Compute volumetric metrics
-  const voxelVolMm3 = origVoxelSize[0] * origVoxelSize[1] * origVoxelSize[2];
-  const labelVolumes = {};
-  let totalVolumeMl = 0;
+  if (calculateMetrics || normalizedImfSettings.enabled) {
+    const voxelVolMm3 = origVoxelSize[0] * origVoxelSize[1] * origVoxelSize[2];
+    const labelVolumes = {};
+    let totalVolumeMl = 0;
 
-  for (let i = 0; i < detectedIndices.length; i++) {
-    const idx = detectedIndices[i];
-    const volMl = labelCounts[idx] * voxelVolMm3 / 1000;
-    labelVolumes[idx] = volMl;
-    totalVolumeMl += volMl;
-  }
-
-  const { labelSliceCounts, sliceAxis, nSlices } = countLabelSlices(
-    outputLabels,
-    detectedIndices,
-    origDims,
-    origVoxelSize
-  );
-
-  let imf = null;
-  if (normalizedImfSettings.enabled) {
-    postProgress(0.985, 'Calculating IMF...');
-    postLog(`Calculating IMF metrics (${normalizedImfSettings.method}, ${normalizedImfSettings.components} components)...`);
-    try {
-      imf = calculateImfMetrics(
-        imageData,
-        outputLabels,
-        detectedIndices,
-        labelCounts,
-        voxelVolMm3,
-        normalizedImfSettings
-      );
-      const processedCount = detectedIndices.length - imf.skippedLabels.length;
-      postLog(`IMF metrics complete for ${processedCount}/${detectedIndices.length} labels`);
-      if (imf.skippedLabels.length > 0) {
-        postLog(`IMF skipped labels with too few or degenerate voxels: ${imf.skippedLabels.join(', ')}`);
-      }
-      if (imf.skippedNonFinite > 0) {
-        postLog(`IMF ignored ${imf.skippedNonFinite} non-finite source voxels`);
-      }
-    } catch (error) {
-      postLog(`Warning: IMF metrics failed: ${error.message}`);
-      imf = null;
+    for (let i = 0; i < detectedIndices.length; i++) {
+      const idx = detectedIndices[i];
+      const volMl = labelCounts[idx] * voxelVolMm3 / 1000;
+      labelVolumes[idx] = volMl;
+      totalVolumeMl += volMl;
     }
-  }
 
-  const metrics = {
-    labelVolumes,
-    labelSliceCounts,
-    totalVolumeMl,
-    voxelSizeMm: origVoxelSize,
-    totalSlices: nSlices,
-    sliceAxis
-  };
-  if (imf) metrics.imf = imf;
-  postMetrics(metrics);
+    const { labelSliceCounts, sliceAxis, nSlices } = countLabelSlices(
+      outputLabels,
+      detectedIndices,
+      origDims,
+      origVoxelSize
+    );
+
+    let imf = null;
+    if (normalizedImfSettings.enabled) {
+      postProgress(0.985, 'Calculating IMF...');
+      postLog(`Calculating IMF metrics (${normalizedImfSettings.method}, ${normalizedImfSettings.components} components)...`);
+      try {
+        imf = calculateImfMetrics(
+          imageData,
+          outputLabels,
+          detectedIndices,
+          labelCounts,
+          voxelVolMm3,
+          normalizedImfSettings
+        );
+        const processedCount = detectedIndices.length - imf.skippedLabels.length;
+        postLog(`IMF metrics complete for ${processedCount}/${detectedIndices.length} labels`);
+        if (imf.skippedLabels.length > 0) {
+          postLog(`IMF skipped labels with too few or degenerate voxels: ${imf.skippedLabels.join(', ')}`);
+        }
+        if (imf.skippedNonFinite > 0) {
+          postLog(`IMF ignored ${imf.skippedNonFinite} non-finite source voxels`);
+        }
+      } catch (error) {
+        postLog(`Warning: IMF metrics failed: ${error.message}`);
+        imf = null;
+      }
+    }
+
+    const metrics = {
+      labelVolumes,
+      labelSliceCounts,
+      totalVolumeMl,
+      voxelSizeMm: origVoxelSize,
+      totalSlices: nSlices,
+      sliceAxis
+    };
+    if (imf) metrics.imf = imf;
+    postMetrics(metrics);
+  }
 
   // 11. Create output NIfTI (full resolution for download)
   const outputNifti = createOutputNifti(outputLabels, headerBytes, origDims);
@@ -1958,6 +2012,15 @@ self.onmessage = async (e) => {
         await runMetricExtraction(data);
       } catch (error) {
         console.error('Metrics error:', error);
+        postError(error?.message || String(error));
+      }
+      break;
+
+    case 'consolidateOnly':
+      try {
+        await runConsolidationOnly(data);
+      } catch (error) {
+        console.error('Consolidation error:', error);
         postError(error?.message || String(error));
       }
       break;
