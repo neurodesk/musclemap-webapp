@@ -5,9 +5,10 @@
  * Adapted for MuscleMap's discrete 100-class colormap.
  */
 
-import { createUint8PreviewNiftiFile } from '../modules/file-io/NiftiUtils.js?v=1.2.18';
+import { createUint8PreviewNiftiFile } from '../modules/file-io/NiftiUtils.js?v=1.2.29';
 
 const LARGE_VOLUME_DISPLAY_LIMIT_BYTES = 256 * 1024 ** 2;
+const COMPRESSED_NIFTI_DISPLAY_LIMIT_BYTES = 100 * 1024 ** 2;
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) return 'unknown size';
@@ -54,34 +55,100 @@ export class ViewerController {
   }
 
   async loadBaseVolume(file) {
-    if (!this.isAvailable()) return;
+    if (!this.isAvailable()) return false;
+    let displayFile = null;
     try {
-      const displayFile = await this._createBaseDisplayFile(file);
-      this.updateOutput(`Loading ${displayFile.name}...`);
-      const url = URL.createObjectURL(displayFile);
-      try {
-        await this.nv.loadVolumes([{ url: url, name: displayFile.name }]);
-      } finally {
-        URL.revokeObjectURL(url);
+      displayFile = await this._createBaseDisplayFile(file);
+      let loaded = await this._tryLoadDisplayFile(displayFile);
+
+      if (!loaded && displayFile === file && this._isNiftiFile(file)) {
+        this.updateOutput('Retrying viewer load with an 8-bit display preview...');
+        displayFile = await this._createBaseDisplayFile(file, { forcePreview: true });
+        loaded = await this._tryLoadDisplayFile(displayFile);
       }
+
+      if (!loaded) return false;
+
       this.currentBaseFile = file;
       this.currentBaseDisplayFile = displayFile;
       this.currentOverlayFile = null;
       this.updateOutput(`${displayFile.name} loaded`);
+      return true;
     } catch (error) {
       this.updateOutput(`Error loading ${file.name}: ${error.message}`);
       console.error(error);
+      this.currentBaseFile = null;
+      this.currentBaseDisplayFile = null;
+      this.currentOverlayFile = null;
+      return false;
     }
   }
 
-  async _createBaseDisplayFile(file) {
-    this.currentBaseDisplayMode = 'original';
-    if (!this._shouldUseUint8Preview(file)) return file;
+  async _tryLoadDisplayFile(displayFile) {
+    this.updateOutput(`Loading ${displayFile.name}...`);
+    try {
+      await this._withNiivueErrorCapture(async () => {
+        const url = URL.createObjectURL(displayFile);
+        try {
+          await this.nv.loadVolumes([{ url: url, name: displayFile.name }]);
+          this.nv.drawScene?.();
+          await this._nextFrame();
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      });
+      return true;
+    } catch (error) {
+      this.updateOutput(`Viewer load failed for ${displayFile.name}: ${error.message}`);
+      console.error(error);
+      return false;
+    }
+  }
 
-    this.updateOutput(
-      `Warning: ${file.name} is ${formatBytes(file.size)}, which can exceed browser GPU texture limits. ` +
-      'Displaying an 8-bit downsampled preview; segmentation will use the original NIfTI data.'
-    );
+  async _withNiivueErrorCapture(action) {
+    const capturedErrors = [];
+    const originalConsoleError = console.error;
+    console.error = (...args) => {
+      const message = args.map(arg => {
+        if (typeof arg === 'string') return arg;
+        if (arg instanceof Error) return arg.message;
+        try {
+          return JSON.stringify(arg);
+        } catch {
+          return String(arg);
+        }
+      }).join(' ');
+      if (message.includes('niivue-error')) capturedErrors.push(message);
+      originalConsoleError.apply(console, args);
+    };
+
+    try {
+      const result = await action();
+      if (capturedErrors.length > 0) {
+        throw new Error(capturedErrors[0]);
+      }
+      return result;
+    } finally {
+      console.error = originalConsoleError;
+    }
+  }
+
+  _nextFrame() {
+    return new Promise(resolve => requestAnimationFrame(() => resolve()));
+  }
+
+  async _createBaseDisplayFile(file, { forcePreview = false } = {}) {
+    this.currentBaseDisplayMode = 'original';
+    if (!forcePreview && !this._shouldUseUint8Preview(file)) return file;
+
+    if (forcePreview) {
+      this.updateOutput('Preparing an 8-bit downsampled preview for display; segmentation will use the original NIfTI data.');
+    } else {
+      this.updateOutput(
+        `Warning: ${file.name} is ${formatBytes(file.size)}, which can exceed browser GPU texture limits. ` +
+        'Displaying an 8-bit downsampled preview; segmentation will use the original NIfTI data.'
+      );
+    }
 
     try {
       const preview = await createUint8PreviewNiftiFile(file);
@@ -95,16 +162,32 @@ export class ViewerController {
       );
       return preview.file;
     } catch (error) {
-      this.updateOutput(`Warning: 8-bit display preview failed: ${error.message}. Trying the original volume.`);
       this.currentBaseDisplayMode = 'original';
+      if (forcePreview) {
+        this.updateOutput(`Warning: 8-bit display preview failed: ${error.message}. Falling back to 2D preview.`);
+        throw error;
+      }
+      this.updateOutput(`Warning: 8-bit display preview failed: ${error.message}. Trying the original volume.`);
       return file;
     }
   }
 
   _shouldUseUint8Preview(file) {
+    if (!this._isNiftiFile(file)) return false;
+    const size = file?.size || 0;
+    return size >= this._displayPreviewThresholdBytes(file);
+  }
+
+  _displayPreviewThresholdBytes(file) {
     const name = file?.name?.toLowerCase?.() || '';
-    const isNifti = name.endsWith('.nii') || name.endsWith('.nii.gz');
-    return isNifti && (file?.size || 0) >= LARGE_VOLUME_DISPLAY_LIMIT_BYTES;
+    return name.endsWith('.nii.gz')
+      ? COMPRESSED_NIFTI_DISPLAY_LIMIT_BYTES
+      : LARGE_VOLUME_DISPLAY_LIMIT_BYTES;
+  }
+
+  _isNiftiFile(file) {
+    const name = file?.name?.toLowerCase?.() || '';
+    return name.endsWith('.nii') || name.endsWith('.nii.gz');
   }
 
   async loadOverlay(file, colormap = 'musclemap', opacity = 0.5) {

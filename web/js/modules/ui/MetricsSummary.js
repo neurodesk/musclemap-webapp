@@ -42,6 +42,9 @@ export class MetricsSummary {
       `${vs[0].toFixed(1)} x ${vs[1].toFixed(1)} x ${vs[2].toFixed(1)}`,
       'Voxel mm'
     ));
+    if (metrics.imf && Number.isFinite(metrics.imf.totalFatPercentage)) {
+      header.appendChild(this._createStat(metrics.imf.totalFatPercentage.toFixed(1), 'IMF %'));
+    }
 
     content.appendChild(header);
 
@@ -87,17 +90,77 @@ export class MetricsSummary {
   _downloadCSV() {
     if (!this.metrics || !this.detectedLabels) return;
 
-    const rows = ['label_index,label_name,volume_ml,slice_count'];
+    const imf = this.metrics.imf || null;
+    const hasImf = !!imf;
+    const columns = ['label_index', 'label_name', 'volume_ml', 'slice_count'];
+
+    if (hasImf) {
+      columns.push(
+        'imf_method',
+        'imf_components',
+        'muscle_percent',
+        'fat_percent',
+        'total_volume_ml',
+        'fat_volume_ml',
+        'muscle_volume_ml',
+        'muscle_threshold'
+      );
+      if (imf.components === 3) {
+        columns.push('undefined_percent', 'undefined_volume_ml', 'fat_threshold');
+      }
+    }
+
+    const rows = [columns.join(',')];
 
     for (const label of this.detectedLabels) {
-      const vol = this.metrics.labelVolumes[label.index] || 0;
-      const slices = this.metrics.labelSliceCounts[label.index] || 0;
-      const name = `"${label.name.replace(/"/g, '""')}"`;
-      rows.push(`${label.index},${name},${vol.toFixed(4)},${slices}`);
+      const row = {
+        label_index: label.index,
+        label_name: label.name,
+        volume_ml: this._formatNumber(this.metrics.labelVolumes[label.index], 4),
+        slice_count: this.metrics.labelSliceCounts[label.index] || 0
+      };
+
+      if (hasImf) {
+        const threshold = imf.thresholds?.[label.index] || {};
+        row.imf_method = imf.method;
+        row.imf_components = imf.components;
+        row.muscle_percent = this._formatNumber(imf.labelMusclePercentages?.[label.index], 2);
+        row.fat_percent = this._formatNumber(imf.labelFatPercentages?.[label.index], 2);
+        row.total_volume_ml = this._formatNumber(imf.labelTotalVolumesMl?.[label.index], 4);
+        row.fat_volume_ml = this._formatNumber(imf.labelFatVolumesMl?.[label.index], 4);
+        row.muscle_volume_ml = this._formatNumber(imf.labelMuscleVolumesMl?.[label.index], 4);
+        row.muscle_threshold = this._formatNumber(threshold.muscleMax, 4);
+        if (imf.components === 3) {
+          row.undefined_percent = this._formatNumber(imf.labelUndefinedPercentages?.[label.index], 2);
+          row.undefined_volume_ml = this._formatNumber(imf.labelUndefinedVolumesMl?.[label.index], 4);
+          row.fat_threshold = this._formatNumber(threshold.fatMin, 4);
+        }
+      }
+
+      rows.push(columns.map(col => this._csvValue(row[col])).join(','));
     }
 
     // Total row
-    rows.push(`,"TOTAL",${this.metrics.totalVolumeMl.toFixed(4)},`);
+    const totalRow = {
+      label_index: '',
+      label_name: 'TOTAL',
+      volume_ml: this._formatNumber(this.metrics.totalVolumeMl, 4),
+      slice_count: ''
+    };
+    if (hasImf) {
+      totalRow.imf_method = imf.method;
+      totalRow.imf_components = imf.components;
+      totalRow.muscle_percent = this._formatNumber(imf.totalMusclePercentage, 2);
+      totalRow.fat_percent = this._formatNumber(imf.totalFatPercentage, 2);
+      totalRow.total_volume_ml = this._formatNumber(imf.totalMeasuredVolumeMl, 4);
+      totalRow.fat_volume_ml = this._formatNumber(imf.totalFatVolumeMl, 4);
+      totalRow.muscle_volume_ml = this._formatNumber(imf.totalMuscleVolumeMl, 4);
+      if (imf.components === 3) {
+        totalRow.undefined_percent = this._formatNumber(imf.totalUndefinedPercentage, 2);
+        totalRow.undefined_volume_ml = this._formatNumber(imf.totalUndefinedVolumeMl, 4);
+      }
+    }
+    rows.push(columns.map(col => this._csvValue(totalRow[col])).join(','));
 
     const csv = rows.join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -109,5 +172,15 @@ export class MetricsSummary {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  _formatNumber(value, digits) {
+    return Number.isFinite(value) ? value.toFixed(digits) : '';
+  }
+
+  _csvValue(value) {
+    if (value == null) return '';
+    const text = String(value);
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   }
 }

@@ -24,6 +24,7 @@ export class InferenceExecutor {
     this.webgpuAvailable = false;
     this.results = {};
     this.stageOrder = [];
+    this.pendingTask = null;
   }
 
   isReady() { return this.workerReady; }
@@ -87,12 +88,20 @@ export class InferenceExecutor {
     this.setProgress(0, 'Failed');
     this.running = false;
     this.onError(message);
+    if (this.pendingTask) {
+      this.pendingTask.reject(new Error(message));
+      this.pendingTask = null;
+    }
   }
 
   _handleComplete() {
     this.updateOutput('Segmentation completed successfully!');
     this.running = false;
     this.onComplete();
+    if (this.pendingTask) {
+      this.pendingTask.resolve(true);
+      this.pendingTask = null;
+    }
   }
 
   _handleStageData(data) {
@@ -143,25 +152,49 @@ export class InferenceExecutor {
     });
   }
 
-  async run(config) {
+  _collectTransferables(value, seen = new Set()) {
+    if (!value || typeof value !== 'object' || seen.has(value)) return [];
+    seen.add(value);
+
+    if (value instanceof ArrayBuffer) return [value];
+    if (ArrayBuffer.isView(value)) return [value.buffer];
+    if (Array.isArray(value)) {
+      return value.flatMap(item => this._collectTransferables(item, seen));
+    }
+
+    return Object.values(value).flatMap(item => this._collectTransferables(item, seen));
+  }
+
+  async _postTask(type, config) {
     try {
       await this.initialize();
 
-      this.updateOutput('Starting segmentation...');
+      this.updateOutput(type === 'run' ? 'Starting segmentation...' : 'Calculating metrics...');
       this.running = true;
       this.results = {};
       this.stageOrder = [];
 
+      const transferables = this._collectTransferables(config);
       this.worker.postMessage({
-        type: 'run',
+        type,
         data: config
-      }, config.inputData ? [config.inputData] : []);
+      }, transferables);
 
-      return true;
+      return new Promise((resolve, reject) => {
+        this.pendingTask = { resolve, reject };
+      });
     } catch (error) {
       this._handleError(error.message);
       return false;
     }
+  }
+
+  async run(config) {
+    return this._postTask('run', config);
+  }
+
+  async calculateMetrics(config) {
+    return this._postTask('metricsOnly', config);
   }
 
   cancel() {

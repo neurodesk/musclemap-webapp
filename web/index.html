@@ -143,9 +143,15 @@
               <div class="file-upload-zone file-drop" id="fileDropZone">
                 <input type="file" id="fileInput" multiple>
                 <svg class="upload-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                <p class="upload-text file-drop-label"><span>Drop NIfTI or DICOM files</span></p>
+                <p class="upload-text file-drop-label"><span>Drop NIfTI, NIfTI labels, or DICOM files</span></p>
               </div>
               <div class="file-list" id="fileList"></div>
+              <div class="file-actions">
+                <button class="btn btn-secondary btn-sm add-files-button" id="addFilesButton" type="button" title="Add files">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                  Add File(s)
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -209,6 +215,49 @@
               <span>Low-Res Mode <span class="info-icon">i<span class="info-tooltip">Runs connected-component cleanup in the cropped working volume before inverse transforms. This is faster and uses less memory, but can slightly reduce final-resolution fidelity. Disabled by default.</span></span></span>
             </label>
           </div>
+          <!-- IMF Metrics -->
+          <div class="param-group imf-controls">
+            <label class="viewer-checkbox">
+              <input type="checkbox" id="imfToggle">
+              <span>IMF Metrics <span class="info-icon">i<span class="info-tooltip">Estimate intramuscular fat from either one T1/T2-weighted spin-echo image with thresholding or a Dixon fat/water pair.</span></span></span>
+            </label>
+            <div class="param-group imf-option-group" id="imfModeGroup">
+              <label class="param-label" for="imfModeSelect">Metric Input</label>
+              <select id="imfModeSelect" disabled>
+                <option value="threshold" selected>T1/T2 SE thresholding</option>
+              </select>
+            </div>
+            <div class="param-group imf-option-group" id="imfSourceGroup">
+              <label class="param-label" for="imfSourceSelect">T1/T2 SE Image</label>
+              <select id="imfSourceSelect" disabled></select>
+            </div>
+            <div class="param-subgrid imf-option-group" id="imfThresholdControls">
+              <div>
+                <label class="param-label" for="imfMethodSelect">Method</label>
+                <select id="imfMethodSelect" disabled>
+                  <option value="kmeans" selected>K-means</option>
+                  <option value="gmm">Gaussian mixture</option>
+                </select>
+              </div>
+              <div>
+                <label class="param-label" for="imfComponentsSelect">Components</label>
+                <select id="imfComponentsSelect" disabled>
+                  <option value="2" selected>2</option>
+                  <option value="3">3</option>
+                </select>
+              </div>
+            </div>
+            <div class="param-subgrid imf-option-group hidden" id="imfDixonControls">
+              <div>
+                <label class="param-label" for="imfFatSelect">Fat Image</label>
+                <select id="imfFatSelect" disabled></select>
+              </div>
+              <div>
+                <label class="param-label" for="imfWaterSelect">Water Image</label>
+                <select id="imfWaterSelect" disabled></select>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -219,6 +268,12 @@
           Run
         </h2>
         <div class="section-content">
+          <div class="param-group hidden" id="consolidateGroup">
+            <label class="viewer-checkbox">
+              <input type="checkbox" id="consolidateSegmentations" checked>
+              <span>Consolidate segmentations <span class="info-icon">i<span class="info-tooltip">When multiple contrasts are segmented, combine label maps voxel-wise before calculating metrics.</span></span></span>
+            </label>
+          </div>
           <button class="btn btn-primary" id="runSegmentation" disabled>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             Run Segmentation
@@ -526,7 +581,7 @@ function toggleSection(section) {
 <script src="nifti-js/index.js"></script>
 
 <!-- Main app -->
-<script type="module" src="js/musclemap-app.js?v=1.2.18"></script>
+<script type="module" src="js/musclemap-app.js?v=1.2.29"></script>
 
 <!-- Cloudflare Web Analytics -->
 <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "913c59d6958b4f5aa5a2c67e2e92fb93"}'></script>

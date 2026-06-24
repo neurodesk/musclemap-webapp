@@ -609,19 +609,36 @@ body {
 /* File List */
 .file-list {
   margin-top: var(--space-xs);
-  max-height: 60px;
+  max-height: 280px;
   overflow-y: auto;
 }
 
-.file-item {
+.file-actions {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  margin-top: var(--space-xs);
+}
+
+.add-files-button {
+  width: 100%;
+}
+
+.file-item {
+  display: grid;
+  gap: var(--space-xs);
   padding: var(--space-xs) var(--space-sm);
   background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   margin-bottom: var(--space-xs);
   font-size: 0.75rem;
+}
+
+.file-item-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
 }
 
 .file-item:last-child {
@@ -655,6 +672,29 @@ body {
   height: 14px;
 }
 
+.file-entry-controls {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.file-role-select {
+  font-size: 0.72rem;
+}
+
+.file-view-button {
+  width: 100%;
+}
+
+.file-segment-toggle {
+  font-size: 0.72rem;
+}
+
+.file-segment-toggle input:disabled + span,
+.file-segment-toggle:has(input:disabled) {
+  color: var(--color-text-dim);
+  cursor: not-allowed;
+}
+
 /* Parameters */
 .param-group {
   margin-bottom: var(--space-sm);
@@ -671,6 +711,17 @@ body {
   font-size: 0.8rem;
   font-weight: 500;
   margin-bottom: 2px;
+}
+
+.param-subgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+}
+
+.imf-option-group {
+  margin-top: var(--space-xs);
 }
 
 .info-icon {
@@ -737,6 +788,13 @@ select {
   background-repeat: no-repeat;
   background-position: right 12px center;
   padding-right: 36px;
+}
+
+select:disabled,
+input[type="number"]:disabled,
+input[type="text"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Buttons */
@@ -1115,6 +1173,10 @@ select {
 }
 
 body.viewer-unavailable .viewer-canvas-wrapper #gl1 {
+  visibility: hidden;
+}
+
+body.viewer-fallback-2d .viewer-canvas-wrapper #gl1 {
   visibility: hidden;
 }
 

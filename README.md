@@ -21,11 +21,14 @@ Open http://localhost:8080 in your browser.
 
 ## Usage
 
-1. **Upload** a whole-body MRI as DICOM folder or NIfTI file
-2. Optionally adjust **sliding window overlap**, **slice thickness**, or enable **Low-Res Mode** in Inference Settings for faster lower-memory postprocessing
-3. Click **Run Segmentation**
-4. View results as a colored overlay; the muscle legend shows all detected muscles
-5. **Download** the segmentation as a NIfTI label map
+1. **Upload** a whole-body MRI as DICOM folder, NIfTI image, or NIfTI label map; use **Add File(s)** to append more NIfTI inputs
+2. Assign each loaded NIfTI to its role: T1/T2 SE image, Dixon fat, Dixon water, Dixon opposed-phase, Dixon in-phase, or segmentation label map
+3. Choose which image contrasts should run segmentation; if multiple contrasts are selected, optionally consolidate their segmentations before metrics
+4. Optionally adjust **sliding window overlap**, **slice thickness**, or enable **Low-Res Mode** in Inference Settings for faster lower-memory postprocessing
+5. Optionally enable **IMF Metrics**. T1/T2 SE metrics use K-means or Gaussian-mixture thresholding from one source image; Dixon metrics require both fat and water images.
+6. Click **Run Segmentation**
+7. View results as a colored overlay; the muscle legend shows all detected muscles
+8. **Download** the segmentation as a NIfTI label map or the metrics CSV
 
 All processing happens locally in your browser. Patient data is not uploaded.
 

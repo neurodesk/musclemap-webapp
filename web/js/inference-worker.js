@@ -753,6 +753,729 @@ function getOptimalWasmThreads() {
   return Math.max(1, hardwareThreads);
 }
 
+// ==================== Intramuscular Fat Metrics ====================
+
+function normalizeImfSettings(settings = {}) {
+  return {
+    enabled: !!settings.enabled,
+    mode: settings.mode === 'dixon' ? 'dixon' : 'threshold',
+    method: settings.method === 'gmm' ? 'gmm' : 'kmeans',
+    components: Number(settings.components) === 3 ? 3 : 2
+  };
+}
+
+function roundTo(value, digits) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function getRange1D(values) {
+  let min = Infinity;
+  let max = -Infinity;
+  let sum = 0;
+  let sumSq = 0;
+
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i];
+    if (value < min) min = value;
+    if (value > max) max = value;
+    sum += value;
+    sumSq += value * value;
+  }
+
+  const mean = values.length ? sum / values.length : 0;
+  const variance = values.length ? Math.max(sumSq / values.length - mean * mean, 0) : 0;
+  return { min, max, mean, variance };
+}
+
+function initializeCenters1D(values, components) {
+  const { min, max } = getRange1D(values);
+  const centers = new Float64Array(components);
+
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+    centers.fill(Number.isFinite(min) ? min : 0);
+    return centers;
+  }
+
+  for (let c = 0; c < components; c++) {
+    centers[c] = min + (max - min) * (c / Math.max(components - 1, 1));
+  }
+  return centers;
+}
+
+function runKMeans1D(values, components, maxIterations = 100) {
+  const labels = new Uint8Array(values.length);
+  const centers = initializeCenters1D(values, components);
+
+  for (let iter = 0; iter < maxIterations; iter++) {
+    let changed = 0;
+    const sums = new Float64Array(components);
+    const counts = new Int32Array(components);
+
+    for (let i = 0; i < values.length; i++) {
+      const value = values[i];
+      let bestCluster = 0;
+      let bestDistance = Infinity;
+
+      for (let c = 0; c < components; c++) {
+        const distance = Math.abs(value - centers[c]);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestCluster = c;
+        }
+      }
+
+      if (labels[i] !== bestCluster) changed++;
+      labels[i] = bestCluster;
+      sums[bestCluster] += value;
+      counts[bestCluster]++;
+    }
+
+    let shift = 0;
+    for (let c = 0; c < components; c++) {
+      if (counts[c] === 0) continue;
+      const nextCenter = sums[c] / counts[c];
+      shift += Math.abs(nextCenter - centers[c]);
+      centers[c] = nextCenter;
+    }
+
+    if (changed === 0 || shift < 0.001) break;
+  }
+
+  return { labels, centers };
+}
+
+function gaussianPdf1D(value, mean, variance, minVariance) {
+  const safeVariance = Math.max(variance, minVariance);
+  const diff = value - mean;
+  return Math.exp(-0.5 * diff * diff / safeVariance) / Math.sqrt(2 * Math.PI * safeVariance);
+}
+
+function initializeGaussianMixture(values, components) {
+  const initial = runKMeans1D(values, components, 50);
+  const { variance: globalVariance } = getRange1D(values);
+  const minVariance = Math.max(globalVariance * 1e-6, 1e-6);
+  const means = new Float64Array(components);
+  const variances = new Float64Array(components);
+  const weights = new Float64Array(components);
+  const sums = new Float64Array(components);
+  const sumSquares = new Float64Array(components);
+  const counts = new Int32Array(components);
+
+  for (let i = 0; i < values.length; i++) {
+    const cluster = initial.labels[i];
+    const value = values[i];
+    sums[cluster] += value;
+    sumSquares[cluster] += value * value;
+    counts[cluster]++;
+  }
+
+  for (let c = 0; c < components; c++) {
+    if (counts[c] > 0) {
+      means[c] = sums[c] / counts[c];
+      variances[c] = Math.max(sumSquares[c] / counts[c] - means[c] * means[c], minVariance);
+      weights[c] = counts[c] / values.length;
+    } else {
+      means[c] = initial.centers[c];
+      variances[c] = Math.max(globalVariance, minVariance);
+      weights[c] = 1 / components;
+    }
+  }
+
+  return { means, variances, weights, minVariance };
+}
+
+function runGaussianMixture1D(values, components, maxIterations = 100) {
+  const labels = new Uint8Array(values.length);
+  const { means, variances, weights, minVariance } = initializeGaussianMixture(values, components);
+  const probabilities = new Float64Array(components);
+  let previousLogLikelihood = -Infinity;
+
+  for (let iter = 0; iter < maxIterations; iter++) {
+    const nk = new Float64Array(components);
+    const sums = new Float64Array(components);
+    const sumSquares = new Float64Array(components);
+    let logLikelihood = 0;
+
+    for (let i = 0; i < values.length; i++) {
+      const value = values[i];
+      let totalProbability = 0;
+
+      for (let c = 0; c < components; c++) {
+        const probability = weights[c] * gaussianPdf1D(value, means[c], variances[c], minVariance);
+        probabilities[c] = probability;
+        totalProbability += probability;
+      }
+
+      if (totalProbability <= 0 || !Number.isFinite(totalProbability)) {
+        let nearest = 0;
+        let bestDistance = Infinity;
+        for (let c = 0; c < components; c++) {
+          const distance = Math.abs(value - means[c]);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            nearest = c;
+          }
+        }
+        probabilities.fill(0);
+        probabilities[nearest] = 1;
+        totalProbability = 1;
+      }
+
+      logLikelihood += Math.log(totalProbability);
+
+      for (let c = 0; c < components; c++) {
+        const responsibility = probabilities[c] / totalProbability;
+        nk[c] += responsibility;
+        sums[c] += responsibility * value;
+        sumSquares[c] += responsibility * value * value;
+      }
+    }
+
+    for (let c = 0; c < components; c++) {
+      if (nk[c] <= 0) continue;
+      means[c] = sums[c] / nk[c];
+      variances[c] = Math.max(sumSquares[c] / nk[c] - means[c] * means[c], minVariance);
+      weights[c] = nk[c] / values.length;
+    }
+
+    if (Math.abs(logLikelihood - previousLogLikelihood) < 1e-4 * Math.max(values.length, 1)) {
+      break;
+    }
+    previousLogLikelihood = logLikelihood;
+  }
+
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i];
+    let bestCluster = 0;
+    let bestProbability = -Infinity;
+
+    for (let c = 0; c < components; c++) {
+      const probability = weights[c] * gaussianPdf1D(value, means[c], variances[c], minVariance);
+      if (probability > bestProbability) {
+        bestProbability = probability;
+        bestCluster = c;
+      }
+    }
+    labels[i] = bestCluster;
+  }
+
+  return { labels, centers: means };
+}
+
+function calculateThresholdsFromClusters(values, labels, components) {
+  const counts = new Int32Array(components);
+  const sums = new Float64Array(components);
+  const mins = new Float64Array(components);
+  const maxs = new Float64Array(components);
+  mins.fill(Infinity);
+  maxs.fill(-Infinity);
+
+  for (let i = 0; i < values.length; i++) {
+    const cluster = labels[i];
+    const value = values[i];
+    counts[cluster]++;
+    sums[cluster] += value;
+    if (value < mins[cluster]) mins[cluster] = value;
+    if (value > maxs[cluster]) maxs[cluster] = value;
+  }
+
+  for (let c = 0; c < components; c++) {
+    if (counts[c] === 0) return null;
+  }
+
+  const sortedClusters = Array.from({ length: components }, (_, cluster) => ({
+    cluster,
+    mean: sums[cluster] / counts[cluster]
+  })).sort((a, b) => a.mean - b.mean);
+
+  if (components === 2) {
+    const muscleCluster = sortedClusters[0].cluster;
+    return {
+      muscleMax: maxs[muscleCluster],
+      fatMin: null
+    };
+  }
+
+  const muscleCluster = sortedClusters[0].cluster;
+  const fatCluster = sortedClusters[2].cluster;
+  return {
+    muscleMax: maxs[muscleCluster],
+    fatMin: mins[fatCluster]
+  };
+}
+
+function calculateThresholdMetricValues(values, thresholds, components, voxelVolMl) {
+  const totalVoxels = values.length;
+  const totalVolumeMl = totalVoxels * voxelVolMl;
+
+  if (components === 2) {
+    let muscleVoxels = 0;
+    for (let i = 0; i < values.length; i++) {
+      if (values[i] <= thresholds.muscleMax) muscleVoxels++;
+    }
+    const fatVoxels = totalVoxels - muscleVoxels;
+    return {
+      musclePercentage: 100 * muscleVoxels / totalVoxels,
+      fatPercentage: 100 * fatVoxels / totalVoxels,
+      totalVolumeMl,
+      fatVolumeMl: fatVoxels * voxelVolMl,
+      muscleVolumeMl: muscleVoxels * voxelVolMl,
+      undefinedPercentage: null,
+      undefinedVolumeMl: null
+    };
+  }
+
+  let musclePercentageVoxels = 0;
+  let undefinedPercentageVoxels = 0;
+  let fatVoxels = 0;
+  let muscleVolumeVoxels = 0;
+  let undefinedVolumeVoxels = 0;
+
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i];
+
+    if (value < thresholds.muscleMax) {
+      musclePercentageVoxels++;
+    } else if (value >= thresholds.fatMin) {
+      fatVoxels++;
+    } else {
+      undefinedPercentageVoxels++;
+    }
+
+    if (value <= thresholds.muscleMax) {
+      muscleVolumeVoxels++;
+    } else if (value > thresholds.muscleMax && value < thresholds.fatMin) {
+      undefinedVolumeVoxels++;
+    }
+  }
+
+  return {
+    musclePercentage: 100 * musclePercentageVoxels / totalVoxels,
+    fatPercentage: 100 * fatVoxels / totalVoxels,
+    totalVolumeMl,
+    fatVolumeMl: fatVoxels * voxelVolMl,
+    muscleVolumeMl: muscleVolumeVoxels * voxelVolMl,
+    undefinedPercentage: 100 * undefinedPercentageVoxels / totalVoxels,
+    undefinedVolumeMl: undefinedVolumeVoxels * voxelVolMl
+  };
+}
+
+function collectLabelIntensityValues(sourceData, outputLabels, detectedIndices, labelCounts) {
+  const valuesByLabel = {};
+  const offsets = {};
+  let skippedNonFinite = 0;
+
+  for (const label of detectedIndices) {
+    valuesByLabel[label] = new Float32Array(labelCounts[label]);
+    offsets[label] = 0;
+  }
+
+  for (let i = 0; i < outputLabels.length; i++) {
+    const label = outputLabels[i];
+    const values = valuesByLabel[label];
+    if (!values) continue;
+
+    const value = sourceData[i];
+    if (Number.isFinite(value)) {
+      values[offsets[label]++] = value;
+    } else {
+      skippedNonFinite++;
+    }
+  }
+
+  for (const label of detectedIndices) {
+    valuesByLabel[label] = valuesByLabel[label].subarray(0, offsets[label]);
+  }
+
+  return { valuesByLabel, skippedNonFinite };
+}
+
+function calculateImfMetrics(sourceData, outputLabels, detectedIndices, labelCounts, voxelVolMm3, settings) {
+  const voxelVolMl = voxelVolMm3 / 1000;
+  const { valuesByLabel, skippedNonFinite } = collectLabelIntensityValues(
+    sourceData,
+    outputLabels,
+    detectedIndices,
+    labelCounts
+  );
+
+  const result = {
+    mode: 'threshold',
+    method: settings.method,
+    components: settings.components,
+    labelMusclePercentages: {},
+    labelFatPercentages: {},
+    labelUndefinedPercentages: {},
+    labelTotalVolumesMl: {},
+    labelFatVolumesMl: {},
+    labelMuscleVolumesMl: {},
+    labelUndefinedVolumesMl: {},
+    thresholds: {},
+    skippedLabels: [],
+    skippedNonFinite,
+    totalMeasuredVolumeMl: 0,
+    totalFatVolumeMl: 0,
+    totalMuscleVolumeMl: 0,
+    totalUndefinedVolumeMl: 0,
+    totalFatPercentage: NaN,
+    totalMusclePercentage: NaN,
+    totalUndefinedPercentage: NaN
+  };
+
+  for (const label of detectedIndices) {
+    const values = valuesByLabel[label];
+    if (!values || values.length < settings.components) {
+      result.skippedLabels.push(label);
+      continue;
+    }
+
+    const clustering = settings.method === 'gmm'
+      ? runGaussianMixture1D(values, settings.components)
+      : runKMeans1D(values, settings.components);
+    const thresholds = calculateThresholdsFromClusters(values, clustering.labels, settings.components);
+    if (!thresholds) {
+      result.skippedLabels.push(label);
+      continue;
+    }
+
+    const metrics = calculateThresholdMetricValues(values, thresholds, settings.components, voxelVolMl);
+    result.thresholds[label] = thresholds;
+    result.labelMusclePercentages[label] = roundTo(metrics.musclePercentage, 2);
+    result.labelFatPercentages[label] = roundTo(metrics.fatPercentage, 2);
+    result.labelTotalVolumesMl[label] = metrics.totalVolumeMl;
+    result.labelFatVolumesMl[label] = metrics.fatVolumeMl;
+    result.labelMuscleVolumesMl[label] = metrics.muscleVolumeMl;
+
+    if (settings.components === 3) {
+      result.labelUndefinedPercentages[label] = roundTo(metrics.undefinedPercentage, 2);
+      result.labelUndefinedVolumesMl[label] = metrics.undefinedVolumeMl;
+      result.totalUndefinedVolumeMl += metrics.undefinedVolumeMl;
+    }
+
+    result.totalMeasuredVolumeMl += metrics.totalVolumeMl;
+    result.totalFatVolumeMl += metrics.fatVolumeMl;
+    result.totalMuscleVolumeMl += metrics.muscleVolumeMl;
+  }
+
+  if (result.totalMeasuredVolumeMl > 0) {
+    result.totalFatPercentage = roundTo(100 * result.totalFatVolumeMl / result.totalMeasuredVolumeMl, 2);
+    result.totalMusclePercentage = roundTo(100 * result.totalMuscleVolumeMl / result.totalMeasuredVolumeMl, 2);
+    if (settings.components === 3) {
+      result.totalUndefinedPercentage = roundTo(100 * result.totalUndefinedVolumeMl / result.totalMeasuredVolumeMl, 2);
+    }
+  }
+
+  return result;
+}
+
+function calculateDixonImfMetrics(fatData, waterData, outputLabels, detectedIndices, labelCounts, voxelVolMm3) {
+  const voxelVolMl = voxelVolMm3 / 1000;
+  const sums = {};
+  const counts = {};
+
+  for (const label of detectedIndices) {
+    sums[label] = 0;
+    counts[label] = 0;
+  }
+
+  let skippedNonFinite = 0;
+  for (let i = 0; i < outputLabels.length; i++) {
+    const label = outputLabels[i];
+    if (!sums.hasOwnProperty(label)) continue;
+
+    const fat = fatData[i];
+    const water = waterData[i];
+    if (!Number.isFinite(fat) || !Number.isFinite(water)) {
+      skippedNonFinite++;
+      continue;
+    }
+
+    const denom = fat + water;
+    const fraction = denom !== 0 ? fat / denom : 0;
+    sums[label] += fraction;
+    counts[label]++;
+  }
+
+  const result = {
+    mode: 'dixon',
+    method: 'dixon',
+    components: null,
+    labelMusclePercentages: {},
+    labelFatPercentages: {},
+    labelUndefinedPercentages: {},
+    labelTotalVolumesMl: {},
+    labelFatVolumesMl: {},
+    labelMuscleVolumesMl: {},
+    labelUndefinedVolumesMl: {},
+    thresholds: {},
+    skippedLabels: [],
+    skippedNonFinite,
+    totalMeasuredVolumeMl: 0,
+    totalFatVolumeMl: 0,
+    totalMuscleVolumeMl: 0,
+    totalUndefinedVolumeMl: 0,
+    totalFatPercentage: NaN,
+    totalMusclePercentage: NaN,
+    totalUndefinedPercentage: NaN
+  };
+
+  for (const label of detectedIndices) {
+    const count = counts[label] || 0;
+    if (count === 0) {
+      result.skippedLabels.push(label);
+      continue;
+    }
+
+    const meanFatFraction = sums[label] / count;
+    const totalVolumeMl = (labelCounts[label] || count) * voxelVolMl;
+    const fatVolumeMl = totalVolumeMl * meanFatFraction;
+    const muscleVolumeMl = Math.max(0, totalVolumeMl - fatVolumeMl);
+
+    result.labelFatPercentages[label] = roundTo(meanFatFraction * 100, 2);
+    result.labelMusclePercentages[label] = roundTo((1 - meanFatFraction) * 100, 2);
+    result.labelTotalVolumesMl[label] = totalVolumeMl;
+    result.labelFatVolumesMl[label] = fatVolumeMl;
+    result.labelMuscleVolumesMl[label] = muscleVolumeMl;
+
+    result.totalMeasuredVolumeMl += totalVolumeMl;
+    result.totalFatVolumeMl += fatVolumeMl;
+    result.totalMuscleVolumeMl += muscleVolumeMl;
+  }
+
+  if (result.totalMeasuredVolumeMl > 0) {
+    result.totalFatPercentage = roundTo(100 * result.totalFatVolumeMl / result.totalMeasuredVolumeMl, 2);
+    result.totalMusclePercentage = roundTo(100 * result.totalMuscleVolumeMl / result.totalMeasuredVolumeMl, 2);
+  }
+
+  return result;
+}
+
+function toLabelArray(imageData) {
+  const labels = new Uint8Array(imageData.length);
+  for (let i = 0; i < imageData.length; i++) {
+    const label = Math.round(imageData[i]);
+    labels[i] = label > 0 && label < 256 ? label : 0;
+  }
+  return labels;
+}
+
+function dimsMatch(a, b) {
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
+
+function consolidateLabelVolumes(labelVolumes) {
+  if (labelVolumes.length === 1) return labelVolumes[0];
+
+  const voxelCount = labelVolumes[0].length;
+  const output = new Uint8Array(voxelCount);
+
+  for (let i = 0; i < voxelCount; i++) {
+    let bestLabel = 0;
+    let bestCount = 0;
+
+    for (let j = 0; j < labelVolumes.length; j++) {
+      const candidate = labelVolumes[j][i];
+      if (candidate === 0) continue;
+
+      let count = 0;
+      for (let k = 0; k < labelVolumes.length; k++) {
+        if (labelVolumes[k][i] === candidate) count++;
+      }
+
+      if (count > bestCount) {
+        bestLabel = candidate;
+        bestCount = count;
+      }
+    }
+
+    output[i] = bestLabel;
+  }
+
+  return output;
+}
+
+function getSliceCountingInfo(dims, voxelSize) {
+  const [onx, ony] = dims;
+  const maxSpacing = Math.max(...voxelSize);
+  const minSpacing = Math.min(...voxelSize);
+  const sliceAxis = (maxSpacing / minSpacing < 1.01)
+    ? 2
+    : voxelSize.indexOf(maxSpacing);
+  const nSlices = dims[sliceAxis];
+  const getSliceIndex = sliceAxis === 0
+    ? (i) => i % onx
+    : sliceAxis === 1
+      ? (i) => Math.floor(i / onx) % ony
+      : (i) => Math.floor(i / (onx * ony));
+
+  return { sliceAxis, nSlices, getSliceIndex };
+}
+
+function countLabelSlices(outputLabels, detectedIndices, dims, voxelSize) {
+  const { sliceAxis, nSlices, getSliceIndex } = getSliceCountingInfo(dims, voxelSize);
+  const sliceLabelSets = new Array(nSlices);
+  for (let s = 0; s < nSlices; s++) sliceLabelSets[s] = new Set();
+  for (let i = 0; i < outputLabels.length; i++) {
+    if (outputLabels[i] > 0) sliceLabelSets[getSliceIndex(i)].add(outputLabels[i]);
+  }
+
+  const labelSliceCounts = {};
+  for (const idx of detectedIndices) {
+    let count = 0;
+    for (let s = 0; s < nSlices; s++) {
+      if (sliceLabelSets[s].has(idx)) count++;
+    }
+    labelSliceCounts[idx] = count;
+  }
+
+  return { labelSliceCounts, sliceAxis, nSlices };
+}
+
+function computeVolumetricMetrics(outputLabels, origDims, origVoxelSize, numClasses) {
+  const classCount = numClasses || 256;
+  const labelCounts = new Int32Array(classCount);
+  for (let i = 0; i < outputLabels.length; i++) {
+    if (outputLabels[i] > 0 && outputLabels[i] < classCount) {
+      labelCounts[outputLabels[i]]++;
+    }
+  }
+
+  const detectedIndices = [];
+  for (let i = 1; i < classCount; i++) {
+    if (labelCounts[i] > 0) detectedIndices.push(i);
+  }
+
+  const voxelVolMm3 = origVoxelSize[0] * origVoxelSize[1] * origVoxelSize[2];
+  const labelVolumes = {};
+  let totalVolumeMl = 0;
+
+  for (const idx of detectedIndices) {
+    const volMl = labelCounts[idx] * voxelVolMm3 / 1000;
+    labelVolumes[idx] = volMl;
+    totalVolumeMl += volMl;
+  }
+
+  const { labelSliceCounts, sliceAxis, nSlices } = countLabelSlices(
+    outputLabels,
+    detectedIndices,
+    origDims,
+    origVoxelSize
+  );
+
+  return {
+    labelCounts,
+    detectedIndices,
+    voxelVolMm3,
+    labelVolumes,
+    labelSliceCounts,
+    sliceAxis,
+    nSlices,
+    totalVolumeMl
+  };
+}
+
+async function runMetricExtraction(config) {
+  const {
+    segmentationDataList = [],
+    metricSourceData = null,
+    dixonFatData = null,
+    dixonWaterData = null,
+    settings = {}
+  } = config;
+
+  if (!segmentationDataList.length) {
+    throw new Error('No segmentation data provided for metrics');
+  }
+
+  postProgress(0.05, 'Reading segmentation...');
+  const parsedSegmentations = segmentationDataList.map(data => parseNiftiInput(data));
+  const firstSegmentation = parsedSegmentations[0];
+  const labelVolumes = [];
+
+  for (const parsed of parsedSegmentations) {
+    if (!dimsMatch(parsed.dims, firstSegmentation.dims)) {
+      throw new Error('All segmentation label maps must have identical dimensions');
+    }
+    labelVolumes.push(toLabelArray(parsed.imageData));
+  }
+
+  const outputLabels = settings.consolidateSegmentations
+    ? consolidateLabelVolumes(labelVolumes)
+    : labelVolumes[0];
+
+  const metricsBase = computeVolumetricMetrics(
+    outputLabels,
+    firstSegmentation.dims,
+    firstSegmentation.voxelSize,
+    settings.numClasses || 256
+  );
+
+  postLog(`Detected ${metricsBase.detectedIndices.length} muscles`);
+  postDetectedLabels(metricsBase.detectedIndices);
+
+  let imf = null;
+  const imfSettings = normalizeImfSettings(settings.imfMetrics || {});
+  if (imfSettings.enabled) {
+    postProgress(0.35, 'Calculating IMF...');
+    if (imfSettings.mode === 'dixon') {
+      if (!dixonFatData || !dixonWaterData) {
+        throw new Error('Dixon IMF metrics require fat and water images');
+      }
+      const fat = parseNiftiInput(dixonFatData);
+      const water = parseNiftiInput(dixonWaterData);
+      if (!dimsMatch(fat.dims, firstSegmentation.dims) || !dimsMatch(water.dims, firstSegmentation.dims)) {
+        throw new Error('Dixon fat, water, and segmentation images must have identical dimensions');
+      }
+      imf = calculateDixonImfMetrics(
+        fat.imageData,
+        water.imageData,
+        outputLabels,
+        metricsBase.detectedIndices,
+        metricsBase.labelCounts,
+        metricsBase.voxelVolMm3
+      );
+    } else {
+      if (!metricSourceData) {
+        throw new Error('Threshold IMF metrics require one source image');
+      }
+      const source = parseNiftiInput(metricSourceData);
+      if (!dimsMatch(source.dims, firstSegmentation.dims)) {
+        throw new Error('Metric source image and segmentation must have identical dimensions');
+      }
+      imf = calculateImfMetrics(
+        source.imageData,
+        outputLabels,
+        metricsBase.detectedIndices,
+        metricsBase.labelCounts,
+        metricsBase.voxelVolMm3,
+        imfSettings
+      );
+    }
+    postLog(`IMF metrics complete for ${metricsBase.detectedIndices.length - imf.skippedLabels.length}/${metricsBase.detectedIndices.length} labels`);
+  }
+
+  const metrics = {
+    labelVolumes: metricsBase.labelVolumes,
+    labelSliceCounts: metricsBase.labelSliceCounts,
+    totalVolumeMl: metricsBase.totalVolumeMl,
+    voxelSizeMm: firstSegmentation.voxelSize,
+    totalSlices: metricsBase.nSlices,
+    sliceAxis: metricsBase.sliceAxis
+  };
+  if (imf) metrics.imf = imf;
+
+  const outputNifti = createOutputNifti(outputLabels, firstSegmentation.headerBytes, firstSegmentation.dims);
+  postStageData(
+    'segmentation',
+    outputNifti,
+    settings.consolidateSegmentations ? 'Consolidated muscle segmentation' : 'Muscle segmentation'
+  );
+  postMetrics(metrics);
+  postProgress(1.0, 'Complete');
+  postComplete();
+}
+
 // ==================== Main Inference Pipeline ====================
 
 async function runInference(config) {
@@ -766,7 +1489,8 @@ async function runInference(config) {
     modelBaseUrl,
     useWebGPU: useWebGPUSetting,
     sliceThickness = -1,
-    lowRes = false
+    lowRes = false,
+    imfMetrics = {}
   } = settings;
 
   // Override WebGPU setting per-run (user may have toggled the checkbox)
@@ -782,6 +1506,7 @@ async function runInference(config) {
   const [ROI_H, ROI_W] = roiSizeSetting || [256, 256];
   const TARGET_SPACING = [1.0, 1.0, (sliceThickness > 0) ? sliceThickness : -1];
   const CROP_MARGIN = 20;
+  const normalizedImfSettings = normalizeImfSettings(imfMetrics);
 
   // 1. Parse NIfTI
   postLog('Parsing input volume...');
@@ -1082,10 +1807,8 @@ async function runInference(config) {
   postDetectedLabels(detectedIndices);
 
   // Compute volumetric metrics
-  const [onx, ony, onz] = origDims;
   const voxelVolMm3 = origVoxelSize[0] * origVoxelSize[1] * origVoxelSize[2];
   const labelVolumes = {};
-  const labelSliceCounts = {};
   let totalVolumeMl = 0;
 
   for (let i = 0; i < detectedIndices.length; i++) {
@@ -1095,27 +1818,50 @@ async function runInference(config) {
     totalVolumeMl += volMl;
   }
 
-  // Single-pass slice counting
-  const sliceLabelSets = new Array(onz);
-  for (let z = 0; z < onz; z++) sliceLabelSets[z] = new Set();
-  for (let i = 0; i < outputLabels.length; i++) {
-    if (outputLabels[i] > 0) sliceLabelSets[Math.floor(i / (onx * ony))].add(outputLabels[i]);
-  }
-  for (const idx of detectedIndices) {
-    let count = 0;
-    for (let z = 0; z < onz; z++) {
-      if (sliceLabelSets[z].has(idx)) count++;
+  const { labelSliceCounts, sliceAxis, nSlices } = countLabelSlices(
+    outputLabels,
+    detectedIndices,
+    origDims,
+    origVoxelSize
+  );
+
+  let imf = null;
+  if (normalizedImfSettings.enabled) {
+    postProgress(0.985, 'Calculating IMF...');
+    postLog(`Calculating IMF metrics (${normalizedImfSettings.method}, ${normalizedImfSettings.components} components)...`);
+    try {
+      imf = calculateImfMetrics(
+        imageData,
+        outputLabels,
+        detectedIndices,
+        labelCounts,
+        voxelVolMm3,
+        normalizedImfSettings
+      );
+      const processedCount = detectedIndices.length - imf.skippedLabels.length;
+      postLog(`IMF metrics complete for ${processedCount}/${detectedIndices.length} labels`);
+      if (imf.skippedLabels.length > 0) {
+        postLog(`IMF skipped labels with too few or degenerate voxels: ${imf.skippedLabels.join(', ')}`);
+      }
+      if (imf.skippedNonFinite > 0) {
+        postLog(`IMF ignored ${imf.skippedNonFinite} non-finite source voxels`);
+      }
+    } catch (error) {
+      postLog(`Warning: IMF metrics failed: ${error.message}`);
+      imf = null;
     }
-    labelSliceCounts[idx] = count;
   }
 
-  postMetrics({
+  const metrics = {
     labelVolumes,
     labelSliceCounts,
     totalVolumeMl,
     voxelSizeMm: origVoxelSize,
-    totalSlices: onz
-  });
+    totalSlices: nSlices,
+    sliceAxis
+  };
+  if (imf) metrics.imf = imf;
+  postMetrics(metrics);
 
   // 11. Create output NIfTI (full resolution for download)
   const outputNifti = createOutputNifti(outputLabels, headerBytes, origDims);
@@ -1203,6 +1949,15 @@ self.onmessage = async (e) => {
         await runInference(data);
       } catch (error) {
         console.error('Inference error:', error);
+        postError(error?.message || String(error));
+      }
+      break;
+
+    case 'metricsOnly':
+      try {
+        await runMetricExtraction(data);
+      } catch (error) {
+        console.error('Metrics error:', error);
         postError(error?.message || String(error));
       }
       break;

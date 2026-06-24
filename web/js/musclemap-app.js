@@ -5,10 +5,10 @@
  */
 
 import { FileIOController } from './controllers/FileIOController.js';
-import { DicomController } from './controllers/DicomController.js?v=1.2.18';
-import { ViewerController } from './controllers/ViewerController.js?v=1.2.18';
+import { DicomController } from './controllers/DicomController.js?v=1.2.29';
+import { ViewerController } from './controllers/ViewerController.js?v=1.2.29';
 import { InferenceExecutor } from './controllers/InferenceExecutor.js';
-import { ConsoleOutput } from './modules/ui/ConsoleOutput.js?v=1.2.18';
+import { ConsoleOutput } from './modules/ui/ConsoleOutput.js?v=1.2.29';
 import { ProgressManager } from './modules/ui/ProgressManager.js';
 import { ModalManager } from './modules/ui/ModalManager.js';
 import { MuscleLegend } from './modules/ui/MuscleLegend.js';
@@ -48,6 +48,7 @@ class MuscleMapApp {
     this._inputVisible = true;
     this._segmentationVisible = true;
     this._lastLocationData = null;
+    this._suppressIntermediateResults = false;
     this.viewerAvailable = false;
     this.viewerUnavailableReason = '';
     this.fallbackPreview = new FallbackNiftiPreview({
@@ -71,14 +72,16 @@ class MuscleMapApp {
     // Controllers
     this.dicomController = new DicomController({
       updateOutput: (msg) => this.updateOutput(msg),
-      onConversionComplete: (file) => {
-        this.fileIOController.setFile(file);
+      onConversionComplete: (files) => {
+        this.fileIOController.setFiles(files);
       }
     });
 
     this.fileIOController = new FileIOController({
       updateOutput: (msg) => this.updateOutput(msg),
       onFileLoaded: (file) => this.onFileLoaded(file),
+      onViewFile: (file) => this.onFileLoaded(file),
+      onFilesChanged: () => this.onFilesChanged(),
       onDicomFiles: (files) => this.dicomController.convertFiles(files)
     });
 
@@ -123,6 +126,8 @@ class MuscleMapApp {
   }
 
   async setupViewer() {
+    const capturedErrors = [];
+    const restoreConsoleError = this.captureNiivueConsoleErrors(capturedErrors);
     try {
       await this.nv.attachTo('gl1');
       if (!this.nv.gl) {
@@ -132,6 +137,10 @@ class MuscleMapApp {
       this.nv.setSliceType(this.nv.sliceTypeMultiplanar);
       this.nv.setInterpolation(true);
       this.nv.drawScene();
+      await new Promise(resolve => requestAnimationFrame(() => resolve()));
+      if (capturedErrors.length > 0) {
+        throw new Error(capturedErrors[0]);
+      }
       this.viewerAvailable = true;
       this.setViewerUnavailableMessage('');
       this.setViewerControlsEnabled(true);
@@ -139,7 +148,29 @@ class MuscleMapApp {
     } catch (error) {
       this.disableViewer(error?.message || 'Viewer initialization failed.');
       return false;
+    } finally {
+      restoreConsoleError();
     }
+  }
+
+  captureNiivueConsoleErrors(capturedErrors) {
+    const originalConsoleError = console.error;
+    console.error = (...args) => {
+      const message = args.map(arg => {
+        if (typeof arg === 'string') return arg;
+        if (arg instanceof Error) return arg.message;
+        try {
+          return JSON.stringify(arg);
+        } catch {
+          return String(arg);
+        }
+      }).join(' ');
+      if (message.includes('niivue-error')) capturedErrors.push(message);
+      originalConsoleError.apply(console, args);
+    };
+    return () => {
+      console.error = originalConsoleError;
+    };
   }
 
   isViewerAvailable() {
@@ -218,6 +249,13 @@ class MuscleMapApp {
     const fileInput = document.getElementById('fileInput');
     if (fileInput) {
       fileInput.addEventListener('change', (e) => this.fileIOController.handleFileInput(e));
+    }
+    const addFilesButton = document.getElementById('addFilesButton');
+    if (addFilesButton && fileInput) {
+      addFilesButton.addEventListener('click', () => {
+        fileInput.value = '';
+        fileInput.click();
+      });
     }
 
     this.setupDropZone();
@@ -307,6 +345,14 @@ class MuscleMapApp {
     const clearResults = document.getElementById('clearResults');
     if (clearResults) clearResults.addEventListener('click', () => this.clearResults());
 
+    const imfToggle = document.getElementById('imfToggle');
+    if (imfToggle) {
+      imfToggle.addEventListener('change', () => this.syncImfControls());
+      this.syncImfControls();
+    }
+    const imfModeSelect = document.getElementById('imfModeSelect');
+    if (imfModeSelect) imfModeSelect.addEventListener('change', () => this.syncImfControls());
+
     // Modal buttons
     const aboutBtn = document.getElementById('aboutButton');
     if (aboutBtn) aboutBtn.addEventListener('click', () => this.aboutModal.open());
@@ -365,8 +411,7 @@ class MuscleMapApp {
       const hasNifti = files.some(f => FileIOController.isNiftiFile(f));
 
       if (hasNifti) {
-        const niftiFile = files.find(f => FileIOController.isNiftiFile(f));
-        this.fileIOController.setFile(niftiFile);
+        this.fileIOController.handleDroppedFiles(files);
       } else if (e.dataTransfer.items?.length) {
         // Could be a folder drop (DICOM) - use items API for directory traversal
         this.dicomController.convertDropItems(e.dataTransfer.items);
@@ -600,7 +645,12 @@ class MuscleMapApp {
   async onFileLoaded(file) {
     this.inputFile = file;
     if (this.isViewerAvailable()) {
-      await this.viewerController.loadBaseVolume(file);
+      const loaded = await this.viewerController.loadBaseVolume(file);
+      if (loaded) {
+        this.fallbackPreview?.clear?.();
+      } else {
+        await this.renderFallbackPreview(file, { stageName: 'Input image' });
+      }
       this.syncWindowControls();
 
       // Set slice thickness default from loaded volume's z-spacing
@@ -627,6 +677,24 @@ class MuscleMapApp {
     this.metricsSummary.hide();
     this._pendingMetrics = null;
     this._detectedLabels = null;
+    this.syncImfControls();
+  }
+
+  onFilesChanged() {
+    this.syncImfControls();
+    const entries = this.fileIOController.getEntries();
+    const currentEntry = entries.find(entry => entry.file === this.inputFile) || null;
+    const currentIsDisplayable = currentEntry && currentEntry.role !== 'segmentation';
+    const primary = this.fileIOController.getPrimaryImageEntry();
+    if (!currentIsDisplayable && primary) {
+      void this.onFileLoaded(primary.file);
+    } else if (!primary && this.inputFile && (!currentEntry || currentEntry.role === 'segmentation')) {
+      this.inputFile = null;
+      this.updateOutput('No displayable input image selected');
+    }
+
+    const runBtn = document.getElementById('runSegmentation');
+    if (runBtn) runBtn.disabled = !this.fileIOController.hasValidData();
   }
 
   async renderFallbackPreview(file, { stageName = 'Image' } = {}) {
@@ -644,12 +712,11 @@ class MuscleMapApp {
   // ==================== Inference ====================
 
   async runSegmentation() {
-    if (!this.fileIOController.hasValidData()) {
+    const entries = this.fileIOController.getEntries();
+    if (entries.length === 0) {
       this.updateOutput('No input volume loaded');
       return;
     }
-
-    const file = this.fileIOController.getActiveFile();
 
     // Get model selection
     const modelSelect = document.getElementById('modelSelect');
@@ -678,7 +745,18 @@ class MuscleMapApp {
     const lowRes = lowResToggle ? lowResToggle.checked : Config.INFERENCE_DEFAULTS.lowRes;
 
     const modelBaseUrl = new URL(Config.MODEL_BASE_URL, window.location.href).href;
-    const inputData = await file.arrayBuffer();
+    const segmentEntries = this.fileIOController.getSegmentEntries();
+    const uploadedSegmentations = this.fileIOController.getSegmentationEntries();
+    if (segmentEntries.length === 0 && uploadedSegmentations.length === 0) {
+      this.updateOutput('Select at least one contrast to segment or provide a segmentation label map.');
+      return;
+    }
+
+    const imfConfig = this.getImfMetricConfig();
+    if (imfConfig.error) {
+      this.updateOutput(imfConfig.error);
+      return;
+    }
 
     const runBtn = document.getElementById('runSegmentation');
     const cancelBtn = document.getElementById('cancelButton');
@@ -703,20 +781,176 @@ class MuscleMapApp {
       this.viewerController.registerMuscleColormap(colormapData);
     }
 
-    await this.inferenceExecutor.run({
-      inputData,
-      settings: {
-        modelName: modelConfig.name,
-        numClasses: modelConfig.numClasses,
-        roiSize: modelConfig.roiSize,
-        overlap,
-        chunkSize,
-        modelBaseUrl,
-        useWebGPU,
-        sliceThickness,
-        lowRes
+    const generatedSegmentations = [];
+    const baseSettings = {
+      modelName: modelConfig.name,
+      numClasses: modelConfig.numClasses,
+      roiSize: modelConfig.roiSize,
+      overlap,
+      chunkSize,
+      modelBaseUrl,
+      useWebGPU,
+      sliceThickness,
+      lowRes,
+      imfMetrics: { enabled: false }
+    };
+
+    try {
+      this._suppressIntermediateResults = true;
+      for (const entry of segmentEntries) {
+        this.updateOutput(`Segmenting ${entry.file.name}...`);
+        const inputData = await entry.file.arrayBuffer();
+        await this.inferenceExecutor.run({ inputData, settings: { ...baseSettings } });
+        const result = this.inferenceExecutor.getResult('segmentation');
+        if (!result?.file) throw new Error(`No segmentation produced for ${entry.file.name}`);
+
+        const baseName = (entry.file.name || 'contrast').replace(/\.(nii|nii\.gz)$/i, '');
+        const segBuffer = await result.file.arrayBuffer();
+        generatedSegmentations.push({
+          entry,
+          file: new File([segBuffer], `${baseName}_segmentation.nii`, { type: 'application/octet-stream' })
+        });
       }
-    });
+
+      this._suppressIntermediateResults = false;
+
+      const consolidate = generatedSegmentations.length > 1 &&
+        !!document.getElementById('consolidateSegmentations')?.checked;
+      const segmentationFiles = generatedSegmentations.length > 0
+        ? (consolidate ? generatedSegmentations.map(item => item.file) : [generatedSegmentations[0].file])
+        : [uploadedSegmentations[0].file];
+
+      const metricsPayload = {
+        segmentationDataList: await Promise.all(segmentationFiles.map(file => file.arrayBuffer())),
+        settings: {
+          numClasses: modelConfig.numClasses,
+          consolidateSegmentations: consolidate,
+          imfMetrics: imfConfig.workerSettings
+        }
+      };
+
+      if (imfConfig.sourceEntry) {
+        metricsPayload.metricSourceData = await imfConfig.sourceEntry.file.arrayBuffer();
+      }
+      if (imfConfig.fatEntry && imfConfig.waterEntry) {
+        metricsPayload.dixonFatData = await imfConfig.fatEntry.file.arrayBuffer();
+        metricsPayload.dixonWaterData = await imfConfig.waterEntry.file.arrayBuffer();
+      }
+
+      await this.inferenceExecutor.calculateMetrics(metricsPayload);
+    } catch (error) {
+      this._suppressIntermediateResults = false;
+      this.updateOutput(`Error: ${error.message}`);
+      this.onInferenceError(error.message);
+    }
+  }
+
+  syncImfControls() {
+    const entries = this.fileIOController.getEntries();
+    const thresholdSources = entries.filter(entry => entry.role !== 'segmentation');
+    const fatEntries = this.fileIOController.getEntriesByRole('dixon_fat');
+    const waterEntries = this.fileIOController.getEntriesByRole('dixon_water');
+    const hasDixon = fatEntries.length > 0 && waterEntries.length > 0;
+
+    const methodSelect = document.getElementById('imfMethodSelect');
+    const componentsSelect = document.getElementById('imfComponentsSelect');
+    const enabled = !!document.getElementById('imfToggle')?.checked;
+    const modeSelect = document.getElementById('imfModeSelect');
+    const sourceSelect = document.getElementById('imfSourceSelect');
+    const fatSelect = document.getElementById('imfFatSelect');
+    const waterSelect = document.getElementById('imfWaterSelect');
+    const sourceGroup = document.getElementById('imfSourceGroup');
+    const thresholdControls = document.getElementById('imfThresholdControls');
+    const dixonControls = document.getElementById('imfDixonControls');
+
+    if (modeSelect) {
+      const currentMode = modeSelect.value;
+      modeSelect.innerHTML = '';
+      modeSelect.appendChild(new Option('T1/T2 SE thresholding', 'threshold'));
+      if (hasDixon) modeSelect.appendChild(new Option('Dixon fat/water fraction', 'dixon'));
+      modeSelect.value = hasDixon && currentMode === 'dixon' ? 'dixon' : 'threshold';
+      modeSelect.disabled = !enabled;
+    }
+
+    const mode = modeSelect?.value || 'threshold';
+    this.populateEntrySelect(sourceSelect, thresholdSources, 'No image available');
+    this.populateEntrySelect(fatSelect, fatEntries, 'No Dixon fat image');
+    this.populateEntrySelect(waterSelect, waterEntries, 'No Dixon water image');
+
+    if (sourceSelect) sourceSelect.disabled = !enabled || mode !== 'threshold' || thresholdSources.length === 0;
+    if (methodSelect) methodSelect.disabled = !enabled || mode !== 'threshold';
+    if (componentsSelect) componentsSelect.disabled = !enabled || mode !== 'threshold';
+    if (fatSelect) fatSelect.disabled = !enabled || mode !== 'dixon';
+    if (waterSelect) waterSelect.disabled = !enabled || mode !== 'dixon';
+
+    sourceGroup?.classList.toggle('hidden', mode !== 'threshold');
+    thresholdControls?.classList.toggle('hidden', mode !== 'threshold');
+    dixonControls?.classList.toggle('hidden', mode !== 'dixon');
+
+    this.syncConsolidationControls();
+  }
+
+  populateEntrySelect(select, entries, emptyLabel) {
+    if (!select) return;
+    const previous = select.value;
+    select.innerHTML = '';
+    if (entries.length === 0) {
+      select.appendChild(new Option(emptyLabel, ''));
+      return;
+    }
+    for (const entry of entries) {
+      select.appendChild(new Option(entry.file.name, entry.id));
+    }
+    if (entries.some(entry => entry.id === previous)) select.value = previous;
+  }
+
+  syncConsolidationControls() {
+    const group = document.getElementById('consolidateGroup');
+    const selectedCount = this.fileIOController.getSegmentEntries().length;
+    if (group) group.classList.toggle('hidden', selectedCount <= 1);
+  }
+
+  getEntryById(id) {
+    return this.fileIOController.getEntries().find(entry => entry.id === id) || null;
+  }
+
+  getImfMetricConfig() {
+    const enabled = !!document.getElementById('imfToggle')?.checked;
+    const defaults = Config.INFERENCE_DEFAULTS.imfMetrics;
+    if (!enabled) return { workerSettings: { enabled: false } };
+
+    const mode = document.getElementById('imfModeSelect')?.value || 'threshold';
+    if (mode === 'dixon') {
+      const fatEntry = this.getEntryById(document.getElementById('imfFatSelect')?.value);
+      const waterEntry = this.getEntryById(document.getElementById('imfWaterSelect')?.value);
+      if (!fatEntry || !waterEntry) {
+        return { error: 'Dixon IMF metrics require both a fat image and a water image.' };
+      }
+      return {
+        fatEntry,
+        waterEntry,
+        workerSettings: {
+          enabled: true,
+          mode: 'dixon'
+        }
+      };
+    }
+
+    const sourceEntry = this.getEntryById(document.getElementById('imfSourceSelect')?.value) ||
+      this.fileIOController.getPrimaryImageEntry();
+    if (!sourceEntry || sourceEntry.role === 'segmentation') {
+      return { error: 'T1/T2 SE IMF metrics require one source image and a segmentation.' };
+    }
+
+    return {
+      sourceEntry,
+      workerSettings: {
+        enabled: true,
+        mode: 'threshold',
+        method: document.getElementById('imfMethodSelect')?.value || defaults.method,
+        components: parseInt(document.getElementById('imfComponentsSelect')?.value || defaults.components, 10)
+      }
+    };
   }
 
   cancelSegmentation() {
@@ -730,6 +964,7 @@ class MuscleMapApp {
   // ==================== Results ====================
 
   handleStageData(data) {
+    if (this._suppressIntermediateResults) return;
     if (data.stage !== 'segmentation') return;
 
     const resultsSection = document.getElementById('resultsSection');
@@ -842,6 +1077,7 @@ class MuscleMapApp {
   }
 
   handleMetrics(metrics) {
+    if (this._suppressIntermediateResults) return;
     this._pendingMetrics = metrics;
 
     // If detected labels already arrived, update legend with volumes and show summary
@@ -859,6 +1095,8 @@ class MuscleMapApp {
   }
 
   onInferenceComplete() {
+    if (this._suppressIntermediateResults) return;
+
     const runBtn = document.getElementById('runSegmentation');
     const cancelBtn = document.getElementById('cancelButton');
     const statusText = document.getElementById('statusText');
@@ -950,9 +1188,17 @@ class MuscleMapApp {
 
   clearFiles() {
     this.fileIOController.clearFiles();
+    this.inputFile = null;
+    this.clearResults();
   }
 }
 
-window.addEventListener('DOMContentLoaded', () => {
-  window.app = new MuscleMapApp();
-});
+function startMuscleMapApp() {
+  if (!window.app) window.app = new MuscleMapApp();
+}
+
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', startMuscleMapApp);
+} else {
+  startMuscleMapApp();
+}

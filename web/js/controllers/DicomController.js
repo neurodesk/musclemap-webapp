@@ -165,7 +165,7 @@ export class DicomController {
       return;
     }
 
-    this.updateOutput(`Converted ${niftiFiles.length} NIfTI file(s). Using: ${niftiFiles[0].name}`);
-    this.onConversionComplete(niftiFiles[0]);
+    this.updateOutput(`Converted ${niftiFiles.length} NIfTI file(s).`);
+    this.onConversionComplete(niftiFiles);
   }
 }

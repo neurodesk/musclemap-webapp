@@ -1,4 +1,4 @@
-export const VERSION = '1.2.18';
+export const VERSION = '1.2.29';
 
 // Models - relative path (served from same origin)
 export const MODEL_BASE_URL = './models';
@@ -18,7 +18,12 @@ export const INFERENCE_DEFAULTS = {
   overlap: 0.5, // 50% overlap for sliding window
   chunkSize: 'auto', // Number of tiles per inference call ('auto' or 1/2/4/8)
   sliceThickness: -1, // Z-axis spacing in mm; -1 means keep original
-  lowRes: false // When true, run faster lower-resolution postprocessing
+  lowRes: false, // When true, run faster lower-resolution postprocessing
+  imfMetrics: {
+    enabled: false,
+    method: 'kmeans',
+    components: 2
+  }
 };
 
 export const VIEWER_CONFIG = {
