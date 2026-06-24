@@ -5,7 +5,7 @@
  * Adapted for MuscleMap's discrete 100-class colormap.
  */
 
-import { createUint8PreviewNiftiFile } from '../modules/file-io/NiftiUtils.js?v=1.2.32';
+import { createUint8PreviewNiftiFile } from '../modules/file-io/NiftiUtils.js?v=1.2.35';
 
 const LARGE_VOLUME_DISPLAY_LIMIT_BYTES = 256 * 1024 ** 2;
 const COMPRESSED_NIFTI_DISPLAY_LIMIT_BYTES = 100 * 1024 ** 2;

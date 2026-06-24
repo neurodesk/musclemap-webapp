@@ -5,10 +5,10 @@
  */
 
 import { FileIOController } from './controllers/FileIOController.js';
-import { DicomController } from './controllers/DicomController.js?v=1.2.32';
-import { ViewerController } from './controllers/ViewerController.js?v=1.2.32';
+import { DicomController } from './controllers/DicomController.js?v=1.2.35';
+import { ViewerController } from './controllers/ViewerController.js?v=1.2.35';
 import { InferenceExecutor } from './controllers/InferenceExecutor.js';
-import { ConsoleOutput } from './modules/ui/ConsoleOutput.js?v=1.2.32';
+import { ConsoleOutput } from './modules/ui/ConsoleOutput.js?v=1.2.35';
 import { ProgressManager } from './modules/ui/ProgressManager.js';
 import { ModalManager } from './modules/ui/ModalManager.js';
 import { MuscleLegend } from './modules/ui/MuscleLegend.js';
@@ -48,6 +48,7 @@ class MuscleMapApp {
     this._metricsSourceId = null;
     this._detectedLabels = null;
     this._lastDetectedLabelIndices = [];
+    this._lastHadDixonImfInputs = false;
     this._overlaySliderValue = 0.5;
     this._inputVisible = true;
     this._segmentationVisible = true;
@@ -572,36 +573,69 @@ class MuscleMapApp {
   }
 
   downloadCurrentVolume() {
-    if (this.viewerController?.isBasePreviewActive?.() && this.inputFile) {
-      const url = URL.createObjectURL(this.inputFile);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = this.inputFile.name || 'volume.nii';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      this.updateOutput(`Downloaded original: ${a.download}`);
-      return;
-    }
-
     if (!this.isViewerAvailable() || !this.nv.volumes?.length) {
       this.updateOutput('No volume loaded');
       return;
     }
-    const vol = this.nv.volumes[0];
+
+    const downloads = [];
+    if (this._inputVisible) {
+      const baseFile = this.viewerController?.getCurrentFile?.() || this.inputFile;
+      if (baseFile) {
+        downloads.push({
+          file: baseFile,
+          name: baseFile.name || 'input.nii',
+          label: 'input image'
+        });
+      } else {
+        downloads.push(this.createNiftiDownloadFromVolume(this.nv.volumes[0], 'input image'));
+      }
+    }
+
+    const activeSegmentation = this.getSegmentationSourceById(this.activeSegmentationId);
+    if (this._segmentationVisible && activeSegmentation?.file) {
+      downloads.push({
+        file: activeSegmentation.file,
+        name: activeSegmentation.file.name || `${activeSegmentation.id}.nii`,
+        label: activeSegmentation.label || 'segmentation'
+      });
+    } else if (this._segmentationVisible && this.nv.volumes.length > 1) {
+      downloads.push(this.createNiftiDownloadFromVolume(this.nv.volumes[1], 'segmentation'));
+    }
+
+    if (downloads.length === 0) {
+      this.updateOutput('No visible scene layers selected for download');
+      return;
+    }
+
+    for (const item of downloads) {
+      this.downloadFile(item.file, item.name);
+    }
+
+    const labels = downloads.map(item => item.label || item.name).join(', ');
+    this.updateOutput(`Downloaded scene layer${downloads.length === 1 ? '' : 's'}: ${labels}`);
+  }
+
+  createNiftiDownloadFromVolume(vol, label = 'volume') {
     const name = (vol.name || 'volume').replace(/\.(nii|nii\.gz)$/i, '');
     const niftiBuffer = this.createNiftiFromVolume(vol);
-    const blob = new Blob([niftiBuffer], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
+    return {
+      file: new File([niftiBuffer], `${name}.nii`, { type: 'application/octet-stream' }),
+      name: `${name}.nii`,
+      label
+    };
+  }
+
+  downloadFile(file, name = file?.name || 'download.nii') {
+    if (!file) return;
+    const url = URL.createObjectURL(file);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${name}.nii`;
+    a.download = name;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    this.updateOutput(`Downloaded: ${name}.nii`);
   }
 
   createNiftiFromVolume(vol) {
@@ -921,12 +955,14 @@ class MuscleMapApp {
 
     if (modeSelect) {
       const currentMode = modeSelect.value;
+      const dixonBecameAvailable = hasDixon && !this._lastHadDixonImfInputs;
       modeSelect.innerHTML = '';
       modeSelect.appendChild(new Option('T1/T2 SE thresholding', 'threshold'));
       if (hasDixon) modeSelect.appendChild(new Option('Dixon fat/water fraction', 'dixon'));
-      modeSelect.value = hasDixon && currentMode === 'dixon' ? 'dixon' : 'threshold';
+      modeSelect.value = hasDixon && (currentMode === 'dixon' || dixonBecameAvailable) ? 'dixon' : 'threshold';
       modeSelect.disabled = !enabled;
     }
+    this._lastHadDixonImfInputs = hasDixon;
 
     const mode = modeSelect?.value || 'threshold';
     this.populateEntrySelect(sourceSelect, thresholdSources, 'No image available');
@@ -1314,10 +1350,10 @@ class MuscleMapApp {
       label.appendChild(document.createTextNode(source.label));
 
       const dlBtn = document.createElement('button');
-      dlBtn.className = 'download-btn';
+      dlBtn.className = 'download-btn segmentation-download-button';
       dlBtn.type = 'button';
       dlBtn.title = 'Download segmentation';
-      dlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+      dlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download</span>';
       dlBtn.addEventListener('click', () => this.downloadSegmentationSource(source.id));
 
       row.appendChild(label);
@@ -1379,14 +1415,9 @@ class MuscleMapApp {
     const source = this.getSegmentationSourceById(id);
     if (!source?.file) return;
 
-    const url = URL.createObjectURL(source.file);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = source.file.name || `${source.id}.nii`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const name = source.file.name || `${source.id}.nii`;
+    this.downloadFile(source.file, name);
+    this.updateOutput(`Downloaded segmentation: ${name}`);
   }
 
   toggleInputVisibility(visible) {

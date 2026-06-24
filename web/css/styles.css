@@ -1544,6 +1544,31 @@ input[type="range"]:disabled::-moz-range-thumb {
   flex-shrink: 0;
 }
 
+.segmentation-download-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 0.72rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.segmentation-download-button:hover {
+  border-color: var(--color-border-light);
+  color: var(--color-primary);
+}
+
+.segmentation-download-button svg {
+  width: 12px;
+  height: 12px;
+}
+
 .metrics-summary-inline {
   margin-top: var(--space-sm);
   padding-top: var(--space-sm);
