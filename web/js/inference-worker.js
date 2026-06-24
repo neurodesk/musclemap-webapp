@@ -1095,16 +1095,36 @@ async function runInference(config) {
     totalVolumeMl += volMl;
   }
 
-  // Single-pass slice counting
-  const sliceLabelSets = new Array(onz);
-  for (let z = 0; z < onz; z++) sliceLabelSets[z] = new Set();
+  // Slice counting: match Python upstream add_slice_counts logic.
+  // Count slices along the axis with the largest voxel spacing (through-slice direction).
+  // Falls back to Z when spacing is nearly isotropic (ratio < 1.01), matching mm_util.py.
+  const maxSpacing = Math.max(...origVoxelSize);
+  const minSpacing = Math.min(...origVoxelSize);
+  let sliceAxis = (maxSpacing / minSpacing < 1.01)
+    ? 2
+    : origVoxelSize.indexOf(maxSpacing);
+
+  // sliceIndex(i) and nSlices depend on which axis we count along.
+  // NIfTI Fortran order: i = x + nx*y + nx*ny*z
+  //   axis 0 (X): sliceIndex = i % onx,                  nSlices = onx
+  //   axis 1 (Y): sliceIndex = Math.floor(i / onx) % ony, nSlices = ony
+  //   axis 2 (Z): sliceIndex = Math.floor(i / (onx*ony)), nSlices = onz
+  const nSlices = [onx, ony, onz][sliceAxis];
+  const getSliceIndex = sliceAxis === 0
+    ? (i) => i % onx
+    : sliceAxis === 1
+      ? (i) => Math.floor(i / onx) % ony
+      : (i) => Math.floor(i / (onx * ony));
+
+  const sliceLabelSets = new Array(nSlices);
+  for (let s = 0; s < nSlices; s++) sliceLabelSets[s] = new Set();
   for (let i = 0; i < outputLabels.length; i++) {
-    if (outputLabels[i] > 0) sliceLabelSets[Math.floor(i / (onx * ony))].add(outputLabels[i]);
+    if (outputLabels[i] > 0) sliceLabelSets[getSliceIndex(i)].add(outputLabels[i]);
   }
   for (const idx of detectedIndices) {
     let count = 0;
-    for (let z = 0; z < onz; z++) {
-      if (sliceLabelSets[z].has(idx)) count++;
+    for (let s = 0; s < nSlices; s++) {
+      if (sliceLabelSets[s].has(idx)) count++;
     }
     labelSliceCounts[idx] = count;
   }
