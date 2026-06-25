@@ -25,4 +25,4 @@ done
 
 echo "Done. Files saved to wasm/"
 echo ""
-echo "Note: Place your ONNX model files in: $SCRIPT_DIR/models/"
+echo "Note: bundled MuscleMap ONNX model files are served from: $SCRIPT_DIR/models/"

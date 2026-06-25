@@ -9,11 +9,8 @@ Browser-based whole-body muscle segmentation using a MONAI 2D UNet model running
 cd web
 bash setup.sh
 
-# 2. Place your ONNX model
-#    Convert from PyTorch (see Model Conversion below), or copy an existing one:
-cp /path/to/musclemap-wholebody.onnx models/
-
-# 3. Start the development server
+# 2. Start the development server
+#    The MuscleMap ONNX models are already committed in web/models/.
 bash run.sh
 ```
 
@@ -48,6 +45,10 @@ python scripts/convert_model.py --checkpoint /path/to/model.pth --quantize
 ```
 
 Output is saved to `web/models/musclemap-wholebody.onnx`.
+
+The ONNX files in `web/models/` are committed so the GitHub Pages deployment
+can serve them directly from the same origin. Temporary PyTorch checkpoints used
+for conversion are cached in `.tmp_weights/`, which is ignored by git.
 
 ## Project Structure
 
@@ -86,8 +87,8 @@ musclemap-webapp/
 │   │           └── MuscleLegend.js    # Detected muscles panel
 │   ├── dcm2niix/                      # DICOM→NIfTI WASM module
 │   ├── nifti-js/                      # NIfTI parser library
-│   ├── wasm/                          # ONNX Runtime WASM (via setup.sh)
-│   └── models/                        # ONNX model (not in git)
+│   ├── wasm/                          # ONNX Runtime WASM (downloaded by setup.sh, ignored by git)
+│   └── models/                        # ONNX models committed for GitHub Pages deployment
 ```
 
 ## Inference Pipeline
