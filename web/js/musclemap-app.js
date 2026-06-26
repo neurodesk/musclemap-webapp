@@ -958,26 +958,37 @@ class MuscleMapApp {
       const dixonBecameAvailable = hasDixon && !this._lastHadDixonImfInputs;
       modeSelect.innerHTML = '';
       modeSelect.appendChild(new Option('T1/T2 SE thresholding', 'threshold'));
-      if (hasDixon) modeSelect.appendChild(new Option('Dixon fat/water fraction', 'dixon'));
-      modeSelect.value = hasDixon && (currentMode === 'dixon' || dixonBecameAvailable) ? 'dixon' : 'threshold';
+      if (hasDixon) {
+        modeSelect.appendChild(new Option('T1/T2 SE + Dixon fat/water', 'both'));
+        modeSelect.appendChild(new Option('Dixon fat/water only', 'dixon'));
+      }
+      if (hasDixon && currentMode === 'dixon') {
+        modeSelect.value = 'dixon';
+      } else if (hasDixon && (currentMode === 'both' || dixonBecameAvailable)) {
+        modeSelect.value = 'both';
+      } else {
+        modeSelect.value = 'threshold';
+      }
       modeSelect.disabled = !enabled;
     }
     this._lastHadDixonImfInputs = hasDixon;
 
     const mode = modeSelect?.value || 'threshold';
+    const usesThreshold = mode !== 'dixon';
+    const usesDixon = mode === 'dixon' || mode === 'both';
     this.populateEntrySelect(sourceSelect, thresholdSources, 'No image available');
     this.populateEntrySelect(fatSelect, fatEntries, 'No Dixon fat image');
     this.populateEntrySelect(waterSelect, waterEntries, 'No Dixon water image');
 
-    if (sourceSelect) sourceSelect.disabled = !enabled || mode !== 'threshold' || thresholdSources.length === 0;
-    if (methodSelect) methodSelect.disabled = !enabled || mode !== 'threshold';
-    if (componentsSelect) componentsSelect.disabled = !enabled || mode !== 'threshold';
-    if (fatSelect) fatSelect.disabled = !enabled || mode !== 'dixon';
-    if (waterSelect) waterSelect.disabled = !enabled || mode !== 'dixon';
+    if (sourceSelect) sourceSelect.disabled = !enabled || !usesThreshold || thresholdSources.length === 0;
+    if (methodSelect) methodSelect.disabled = !enabled || !usesThreshold;
+    if (componentsSelect) componentsSelect.disabled = !enabled || !usesThreshold;
+    if (fatSelect) fatSelect.disabled = !enabled || !usesDixon;
+    if (waterSelect) waterSelect.disabled = !enabled || !usesDixon;
 
-    sourceGroup?.classList.toggle('hidden', mode !== 'threshold');
-    thresholdControls?.classList.toggle('hidden', mode !== 'threshold');
-    dixonControls?.classList.toggle('hidden', mode !== 'dixon');
+    sourceGroup?.classList.toggle('hidden', !usesThreshold);
+    thresholdControls?.classList.toggle('hidden', !usesThreshold);
+    dixonControls?.classList.toggle('hidden', !usesDixon);
 
     this.syncMetricsActionState();
   }
@@ -1209,33 +1220,33 @@ class MuscleMapApp {
     if (!enabled) return { workerSettings: { enabled: false } };
 
     const mode = document.getElementById('imfModeSelect')?.value || 'threshold';
-    if (mode === 'dixon') {
-      const fatEntry = this.getEntryById(document.getElementById('imfFatSelect')?.value);
-      const waterEntry = this.getEntryById(document.getElementById('imfWaterSelect')?.value);
-      if (!fatEntry || !waterEntry) {
-        return { error: 'Dixon IMF metrics require both a fat image and a water image.' };
-      }
-      return {
-        fatEntry,
-        waterEntry,
-        workerSettings: {
-          enabled: true,
-          mode: 'dixon'
-        }
-      };
-    }
+    const usesThreshold = mode !== 'dixon';
+    const usesDixon = mode === 'dixon' || mode === 'both';
+    const sourceEntry = usesThreshold
+      ? this.getEntryById(document.getElementById('imfSourceSelect')?.value) ||
+        this.fileIOController.getPrimaryImageEntry()
+      : null;
+    const fatEntry = usesDixon
+      ? this.getEntryById(document.getElementById('imfFatSelect')?.value)
+      : null;
+    const waterEntry = usesDixon
+      ? this.getEntryById(document.getElementById('imfWaterSelect')?.value)
+      : null;
 
-    const sourceEntry = this.getEntryById(document.getElementById('imfSourceSelect')?.value) ||
-      this.fileIOController.getPrimaryImageEntry();
-    if (!sourceEntry || sourceEntry.role === 'segmentation') {
+    if (usesThreshold && (!sourceEntry || sourceEntry.role === 'segmentation')) {
       return { error: 'T1/T2 SE IMF metrics require one source image and a segmentation.' };
+    }
+    if (usesDixon && (!fatEntry || !waterEntry)) {
+      return { error: 'Dixon IMF metrics require both a fat image and a water image.' };
     }
 
     return {
       sourceEntry,
+      fatEntry,
+      waterEntry,
       workerSettings: {
         enabled: true,
-        mode: 'threshold',
+        mode,
         method: document.getElementById('imfMethodSelect')?.value || defaults.method,
         components: parseInt(document.getElementById('imfComponentsSelect')?.value || defaults.components, 10)
       }
