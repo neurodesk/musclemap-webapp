@@ -43,7 +43,8 @@ export class MetricsSummary {
       'Voxel mm'
     ));
     if (metrics.imf && Number.isFinite(metrics.imf.totalFatPercentage)) {
-      header.appendChild(this._createStat(metrics.imf.totalFatPercentage.toFixed(1), 'IMF %'));
+      const fatPercentLabel = metrics.imf.mode === 'dixon' ? 'Dixon fat %' : 'IMF %';
+      header.appendChild(this._createStat(metrics.imf.totalFatPercentage.toFixed(1), fatPercentLabel));
     }
 
     content.appendChild(header);
@@ -96,6 +97,7 @@ export class MetricsSummary {
 
     if (hasImf) {
       columns.push(
+        'imf_mode',
         'imf_method',
         'imf_components',
         'muscle_percent',
@@ -122,6 +124,7 @@ export class MetricsSummary {
 
       if (hasImf) {
         const threshold = imf.thresholds?.[label.index] || {};
+        row.imf_mode = imf.mode;
         row.imf_method = imf.method;
         row.imf_components = imf.components;
         row.muscle_percent = this._formatNumber(imf.labelMusclePercentages?.[label.index], 2);
@@ -148,6 +151,7 @@ export class MetricsSummary {
       slice_count: ''
     };
     if (hasImf) {
+      totalRow.imf_mode = imf.mode;
       totalRow.imf_method = imf.method;
       totalRow.imf_components = imf.components;
       totalRow.muscle_percent = this._formatNumber(imf.totalMusclePercentage, 2);
