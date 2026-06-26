@@ -25,7 +25,7 @@ Open http://localhost:8080 in your browser.
 5. Click **Run Segmentation**
 6. Inspect each generated segmentation overlay independently in **Results**
 7. In **Postprocessing**, optionally consolidate multiple segmentations into one label map
-8. In **Postprocessing**, optionally calculate volumetric metrics or IMF metrics. T1/T2 SE metrics use K-means or Gaussian-mixture thresholding from one source image; Dixon metrics require both fat and water images.
+8. In **Postprocessing**, optionally calculate volumetric metrics or IMF metrics. T1/T2 SE metrics use K-means or Gaussian-mixture thresholding from one source image; Dixon metrics require both fat and water images and can be calculated alongside T1/T2 SE IMF.
 9. **Download** segmentation NIfTI label maps or the metrics CSV
 
 All processing happens locally in your browser. Patient data is not uploaded.

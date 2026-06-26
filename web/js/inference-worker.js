@@ -756,12 +756,23 @@ function getOptimalWasmThreads() {
 // ==================== Intramuscular Fat Metrics ====================
 
 function normalizeImfSettings(settings = {}) {
+  const mode = settings.mode === 'dixon' || settings.mode === 'both'
+    ? settings.mode
+    : 'threshold';
   return {
     enabled: !!settings.enabled,
-    mode: settings.mode === 'dixon' ? 'dixon' : 'threshold',
+    mode,
     method: settings.method === 'gmm' ? 'gmm' : 'kmeans',
     components: Number(settings.components) === 3 ? 3 : 2
   };
+}
+
+function imfUsesThreshold(settings) {
+  return settings.mode !== 'dixon';
+}
+
+function imfUsesDixon(settings) {
+  return settings.mode === 'dixon' || settings.mode === 'both';
 }
 
 function roundTo(value, digits) {
@@ -1438,11 +1449,30 @@ async function runMetricExtraction(config) {
   postLog(`Detected ${metricsBase.detectedIndices.length} muscles`);
   postDetectedLabels(metricsBase.detectedIndices);
 
-  let imf = null;
+  let imfThreshold = null;
+  let imfDixon = null;
   const imfSettings = normalizeImfSettings(settings.imfMetrics || {});
   if (imfSettings.enabled) {
     postProgress(0.35, 'Calculating IMF...');
-    if (imfSettings.mode === 'dixon') {
+    if (imfUsesThreshold(imfSettings)) {
+      if (!metricSourceData) {
+        throw new Error('Threshold IMF metrics require one source image');
+      }
+      const source = parseNiftiInput(metricSourceData);
+      if (!dimsMatch(source.dims, firstSegmentation.dims)) {
+        throw new Error('Metric source image and segmentation must have identical dimensions');
+      }
+      imfThreshold = calculateImfMetrics(
+        source.imageData,
+        outputLabels,
+        metricsBase.detectedIndices,
+        metricsBase.labelCounts,
+        metricsBase.voxelVolMm3,
+        imfSettings
+      );
+      postLog(`Threshold IMF metrics complete for ${metricsBase.detectedIndices.length - imfThreshold.skippedLabels.length}/${metricsBase.detectedIndices.length} labels`);
+    }
+    if (imfUsesDixon(imfSettings)) {
       if (!dixonFatData || !dixonWaterData) {
         throw new Error('Dixon IMF metrics require fat and water images');
       }
@@ -1451,7 +1481,7 @@ async function runMetricExtraction(config) {
       if (!dimsMatch(fat.dims, firstSegmentation.dims) || !dimsMatch(water.dims, firstSegmentation.dims)) {
         throw new Error('Dixon fat, water, and segmentation images must have identical dimensions');
       }
-      imf = calculateDixonImfMetrics(
+      imfDixon = calculateDixonImfMetrics(
         fat.imageData,
         water.imageData,
         outputLabels,
@@ -1459,24 +1489,8 @@ async function runMetricExtraction(config) {
         metricsBase.labelCounts,
         metricsBase.voxelVolMm3
       );
-    } else {
-      if (!metricSourceData) {
-        throw new Error('Threshold IMF metrics require one source image');
-      }
-      const source = parseNiftiInput(metricSourceData);
-      if (!dimsMatch(source.dims, firstSegmentation.dims)) {
-        throw new Error('Metric source image and segmentation must have identical dimensions');
-      }
-      imf = calculateImfMetrics(
-        source.imageData,
-        outputLabels,
-        metricsBase.detectedIndices,
-        metricsBase.labelCounts,
-        metricsBase.voxelVolMm3,
-        imfSettings
-      );
+      postLog(`Dixon fat metrics complete for ${metricsBase.detectedIndices.length - imfDixon.skippedLabels.length}/${metricsBase.detectedIndices.length} labels`);
     }
-    postLog(`IMF metrics complete for ${metricsBase.detectedIndices.length - imf.skippedLabels.length}/${metricsBase.detectedIndices.length} labels`);
   }
 
   const metrics = {
@@ -1487,7 +1501,14 @@ async function runMetricExtraction(config) {
     totalSlices: metricsBase.nSlices,
     sliceAxis: metricsBase.sliceAxis
   };
-  if (imf) metrics.imf = imf;
+  if (imfThreshold) {
+    metrics.imf = imfThreshold;
+    metrics.imfThreshold = imfThreshold;
+  }
+  if (imfDixon) {
+    if (!metrics.imf) metrics.imf = imfDixon;
+    metrics.imfDixon = imfDixon;
+  }
 
   const outputNifti = createOutputNifti(outputLabels, firstSegmentation.headerBytes, firstSegmentation.dims);
   postStageData(
