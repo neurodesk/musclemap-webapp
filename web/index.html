@@ -525,7 +525,7 @@
       <p>MuscleMap uses ONNX Runtime Web to run deep learning models directly in the browser via WebAssembly. Your NIfTI or DICOM files are read into browser memory, processed locally, and results are displayed without any network transfer.</p>
 
       <h4>Third-party services</h4>
-      <p>MuscleMap uses Cloudflare Web Analytics to collect privacy-preserving site usage metrics. Patient images, voxel values, screenshots, and generated segmentations are not sent to analytics services. Other network requests load the application itself, runtime assets, and model files, which may be cached locally.</p>
+      <p>MuscleMap uses Google Analytics to collect site usage metrics. Analytics is disabled when your browser sends a Do Not Track setting of <code>1</code> or <code>yes</code>. Patient images, voxel values, screenshots, and generated segmentations are not sent to Google Analytics. Other network requests load the application itself, runtime assets, and model files, which may be cached locally.</p>
     </div>
   </div>
 </div>
@@ -598,9 +598,19 @@ function toggleSection(section) {
 <!-- Main app -->
 <script type="module" src="js/musclemap-app.js?v=1.2.35"></script>
 
-<!-- Cloudflare Web Analytics -->
-<script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "913c59d6958b4f5aa5a2c67e2e92fb93"}'></script>
-<!-- End Cloudflare Web Analytics -->
+<!-- Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-4Z9774J59Y"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag() { dataLayer.push(arguments); }
+  gtag('js', new Date());
+
+  var dnt = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
+  if (dnt !== '1' && dnt !== 'yes') {
+    gtag('config', 'G-4Z9774J59Y');
+  }
+</script>
+<!-- End Google Analytics -->
 
 </body>
 </html>
