@@ -32,7 +32,14 @@ try {
 }
 
 // Required template files must exist — fail loudly, do not silently skip.
-const REQUIRED = ["package.json", "vite.config.js", "eslint.config.js", "index.html", "src/main.js"];
+const REQUIRED = [
+  "package.json",
+  "vite.config.js",
+  "eslint.config.js",
+  "wrangler.toml",
+  "index.html",
+  "src/main.js",
+];
 for (const f of REQUIRED) {
   try {
     await access(join(src, f));

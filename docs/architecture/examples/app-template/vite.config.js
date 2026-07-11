@@ -4,8 +4,8 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  // Set by the deploy workflow: "/" on Cloudflare (own domain), "/APP_NAME/" on GitHub Pages subpath.
-  base: process.env.BASE_PATH || "/",
+  // Each app has its own Cloudflare Pages domain, so it is served from the root.
+  base: "/",
   build: { target: "es2022", outDir: "dist", assetsInlineLimit: 0 },
   worker: { format: "es" },
   // Dev-server COOP/COEP ONLY. Production isolation comes from public/_headers or the COI SW.

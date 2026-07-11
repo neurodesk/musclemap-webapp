@@ -1,0 +1,93 @@
+# .github/workflows/deploy.cloudflare.yml
+# Deploys each app to its OWN Cloudflare Pages project via Direct Upload (wrangler).
+# - push to main            -> staging (preview) deploy for AFFECTED apps
+# - push tag <app>-v*       -> production deploy for that one app
+# Each app has a Pages project whose PRODUCTION branch is "production" (normally no commits),
+# so main deploys are previews and production is reached only via --branch=production from a tag.
+name: deploy-cloudflare
+
+on:
+  push:
+    branches: [main]
+    tags: ["*-v*"]
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "app name to (re)deploy to production"
+        required: true
+
+concurrency:
+  # Serialize per ref so repeated pushes don't upload out of order.
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+  TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  # ---------- STAGING: affected apps on main ----------
+  discover:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.list.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 } # Turbo needs history to compute the affected set.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - id: list
+        # Apps changed vs the previous commit (package name == app dir name; app packages live in apps/*).
+        run: |
+          set -euo pipefail
+          apps=$(pnpm exec turbo run build --filter="{./apps/*}[HEAD^1]" --dry=json \
+            | jq -c '[.tasks[].package] | unique')
+          echo "apps=${apps:-[]}" >> "$GITHUB_OUTPUT"
+
+  stage:
+    needs: discover
+    if: needs.discover.outputs.apps != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.discover.outputs.apps) }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec turbo run build --filter=${{ matrix.app }}
+      # --branch != the project's production branch -> a PREVIEW (staging) deployment.
+      - name: Deploy ${{ matrix.app }} (staging)
+        run: >
+          pnpm exec wrangler pages deploy apps/${{ matrix.app }}/dist
+          --project-name=${{ matrix.app }} --branch=main
+
+  # ---------- PRODUCTION: one app, on its tag ----------
+  production:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - name: Resolve app from tag
+        id: tag
+        run: echo "app=${GITHUB_REF_NAME%-v*}" >> "$GITHUB_OUTPUT" # musclemap-v1.2.3 -> musclemap
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec turbo run build --filter=${{ steps.tag.outputs.app }}
+      # --branch=production == the project's production branch -> a PRODUCTION deployment.
+      - name: Deploy ${{ steps.tag.outputs.app }} (production)
+        run: >
+          pnpm exec wrangler pages deploy apps/${{ steps.tag.outputs.app }}/dist
+          --project-name=${{ steps.tag.outputs.app }} --branch=production

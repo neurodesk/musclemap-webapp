@@ -1,6 +1,9 @@
 # NeuroDesk Webapps — Architecture & Migration Proposal
 
-**Status:** RFC (revision 2 — addresses review) · **Date:** 2026-07-11 · **Owner:** @bollmann.steffen
+**Status:** RFC (revision 3) · **Date:** 2026-07-11 · **Owner:** @bollmann.steffen
+
+**Decided:** deploy host is **Cloudflare Pages — one project per app from this monorepo** (open
+decision #1 resolved by @bollmann.steffen). The GitHub Pages single-artifact fallback is dropped.
 
 Goal: a maintainable, scalable structure for the NeuroDesk browser webapps that lets us
 **reuse components across apps**, makes it **very easy to add a new app**, and treats
@@ -196,19 +199,26 @@ logs. These are patient-data applications; telemetry is an allow-list, not a den
 - **Deploy through Turbo** (`turbo run build --filter=<app>`), not raw `pnpm --filter … build`, so
   caching and task deps apply.
 
-### Deployment — must not race
+### Deployment — Cloudflare Pages, one project per app (decided)
 Revision 1 called `deploy-pages` once per matrix job, all targeting the **same** repo Pages site;
-they race and overwrite, and `base: /musclemap/` does not place the artifact under that directory.
-Two correct options:
+they race and overwrite. The committed model instead gives **each app its own Cloudflare Pages
+project**, deployed by CI via **Direct Upload** (`wrangler pages deploy`):
 
-- **Preferred — Cloudflare Pages, one project per app from the monorepo.** Cloudflare explicitly
-  supports multiple projects from a single monorepo (per-project *root directory* + *build watch
-  paths*). This preserves each `*.neurodesk.org` domain and gives independent deploys with no racing.
-  See [`examples/deploy.cloudflare.md`](./examples/deploy.cloudflare.md) and
-  [`examples/_headers`](./examples/_headers) (production COOP/COEP).
-- **Fallback — single GitHub Pages artifact.** Build all changed apps in parallel, **assemble one
-  artifact** with `/musclemap/`, `/calmar/`, … subdirectories, then call `deploy-pages` **once**.
-  See [`examples/deploy.github-pages.yml`](./examples/deploy.github-pages.yml).
+- One project per app (`musclemap`, `calmar`, …), each mapped to its own custom domain
+  (`musclemap.neurodesk.org`). Independent deploys, no shared site, no racing.
+- CI builds through **Turbo** (affected-only, cached) and uploads `apps/<app>/dist` to that app's
+  project. Direct Upload — not Cloudflare's dashboard Git integration — so the build is reproducible
+  in-repo and Turbo caching applies.
+- **Staging vs production via the project's production branch.** Each project's production branch is
+  set to `production` (which normally receives no commits). Pushes to `main` deploy as **preview =
+  staging**; a per-app tag `foo-v*` triggers a **production** Direct Upload with `--branch=production`.
+  So `main` is always staging and production is tag-gated, per app.
+- See [`examples/deploy.cloudflare.yml`](./examples/deploy.cloudflare.yml) (the CI workflow),
+  [`examples/deploy.cloudflare.md`](./examples/deploy.cloudflare.md) (project + secrets setup), and
+  [`examples/_headers`](./examples/_headers) (production COOP/COEP served at the edge).
+
+Required repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (plus `TURBO_TOKEN`/`TURBO_TEAM`
+for remote cache). Each app ships a `wrangler.toml` naming its Pages project.
 
 ### Cross-origin isolation in production (not just dev)
 Vite's `server.headers` COOP/COEP apply only to the **dev** server. Production must serve COOP/COEP
@@ -225,9 +235,10 @@ Under [`examples/`](./examples/) — **contracts to validate, not trusted produc
 
 - `pnpm-workspace.yaml`, `root-package.json`, `turbo.json`
 - `ci.yml` — affected-only + remote cache + per-package tests
-- `deploy.cloudflare.md` + `_headers` — preferred deploy, production COOP/COEP
-- `deploy.github-pages.yml` — fallback single-artifact deploy (no race)
-- `new-app.mjs` + `app-template/` — **self-contained** scaffold using `@neurodesk/webapp-components/*`
+- `deploy.cloudflare.yml` — CI: Turbo build + `wrangler pages deploy` per app, staging/prod split
+- `deploy.cloudflare.md` + `_headers` — project/secrets setup, production COOP/COEP
+- `new-app.mjs` + `app-template/` — **self-contained** scaffold using `@neurodesk/webapp-components/*`,
+  ships its own `wrangler.toml`
 - `changeset-config.json` — independent versioning incl. private packages
 - `models.manifest.json` — externalized model contract
 - `telemetry-allowlist.js` — typed, patient-data-safe allow-list
@@ -239,8 +250,9 @@ Under [`examples/`](./examples/) — **contracts to validate, not trusted produc
 ### Phase 0 — Licensing, ownership, assets (blocking)
 Resolve licences on all in-scope repos/models/atlases; get collaborator consent for QSMbly/SeedSeg/
 dicompare (or defer them); define model manifests and strip large binaries from any history to be
-imported. Stand up the empty monorepo (root config, CI, Changesets, Cloudflare projects) with **no
-apps** yet.
+imported. Stand up the empty monorepo (root config, CI, Changesets) and create the Cloudflare Pages
+projects: one per in-scope app, each with production branch set to `production` and its
+`*.neurodesk.org` custom domain; add `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` repo secrets.
 
 ### Phase 1 — MuscleMap pilot (behind parity tests)
 1. Import `web/` history **without** `.onnx` blobs; add `models/musclemap.manifest.json`.
@@ -251,7 +263,8 @@ apps** yet.
 5. Add `packages/analytics` allow-list; wire MuscleMap; confirm no prohibited fields emit.
 6. Swap `setup.sh`/`run.sh` for Vite; ship COI service worker (or Cloudflare `_headers`); add the
    deployed `crossOriginIsolated` smoke test.
-7. Deploy via one Cloudflare project; verify `musclemap.neurodesk.org` parity.
+7. Deploy via the `musclemap` Cloudflare Pages project (tag `musclemap-v*` → production); verify
+   `musclemap.neurodesk.org` parity and that the deployed `crossOriginIsolated` smoke test passes.
 
 ### Phase 2 — VesselBoost, SCT, CALMaR, then QSMbly
 Repeat Phase 1 per app, moving up the tiers only as parity holds. CALMaR keeps its
@@ -276,9 +289,10 @@ pnpm --filter cerebellum dev
 
 ## 12. Open decisions for @bollmann.steffen
 
-1. **Deploy host** — Cloudflare Pages projects per app (recommended, keeps `*.neurodesk.org`) vs.
-   single-artifact GitHub Pages?
+1. ~~**Deploy host**~~ — **Decided: Cloudflare Pages, one project per app** (keeps `*.neurodesk.org`).
 2. **Initial scope** — four org imaging apps now (recommended) vs. push for all seven up front?
 3. **Collaborator apps** — pursue consent for QSMbly/SeedSeg/dicompare now, or design-only for later?
 4. **Publish the library to npm** eventually, or keep it workspace-internal indefinitely?
 5. **Models** — Hugging Face vs. GitHub Releases as the immutable model host?
+6. **Production branch name** — `production` as the tag-gated production target (as written), or wire
+   production straight off `main` and use previews only for PRs?

@@ -1,36 +1,52 @@
-# Preferred deploy: Cloudflare Pages, one project per app, from one monorepo
+# Deploy: Cloudflare Pages, one project per app (Direct Upload from CI)
 
-Cloudflare Pages supports **multiple projects backed by the same repository**, so each app deploys
-independently and keeps its own `*.neurodesk.org` custom domain. This avoids the GitHub Pages
-single-site race entirely (revision 1's `deploy.yml` ran `deploy-pages` once per app against one
-Pages site — the jobs overwrote each other).
+**Decision:** each app is its own Cloudflare Pages project, deployed by CI via
+`wrangler pages deploy` (Direct Upload) — not the dashboard Git integration — so builds run through
+Turbo (affected-only, cached) and stay reproducible in-repo. The CI workflow is
+[`deploy.cloudflare.yml`](./deploy.cloudflare.yml).
 
-## Per-app project settings (in the Cloudflare dashboard or via API)
+## One-time setup per app
 
-For each app, create a Pages project connected to `neurodesk/neurodesk-webapps`:
+Create a Pages project named exactly like the app (`musclemap`, `calmar`, …):
 
-| Setting | Value (musclemap example) |
-| --- | --- |
-| Production branch | `main` |
-| Root directory (advanced) | `apps/musclemap` |
-| Build command | `pnpm exec turbo run build --filter=musclemap` |
-| Build output directory | `apps/musclemap/dist` |
-| Build watch paths | `apps/musclemap/**`, `packages/components/**`, `packages/analytics/**` |
-| Custom domain | `musclemap.neurodesk.org` |
+```bash
+# Direct-Upload project (no Git connection); production branch is "production".
+pnpm exec wrangler pages project create musclemap --production-branch=production
+```
 
-**Build watch paths** ensure a project only rebuilds when that app or a dependency it uses changes —
-push to `apps/calmar` does not redeploy MuscleMap. Point the build command at Turbo (not raw
-`pnpm --filter … build`) so caching and task dependencies apply.
+Then, in the dashboard (or via API), add the **custom domain** `musclemap.neurodesk.org` to that
+project. Each app also ships a `wrangler.toml` (see the app template) so `wrangler pages deploy`
+resolves the project name and output dir locally without flags.
 
-## Staging vs production
+## Repo secrets / variables
 
-- **Preview deployments**: every PR / non-production branch gets a Cloudflare preview URL per project.
-- **Production**: pushes to `main` publish the production deployment for changed projects; if you want
-  tag-gated production, disable auto-production on `main` and trigger via the Cloudflare deploy API
-  from a per-app tag workflow (`musclemap-v*`), keeping `main` as staging.
+| Name | Where | Purpose |
+| --- | --- | --- |
+| `CLOUDFLARE_API_TOKEN` | secret | token with **Cloudflare Pages: Edit** on the account |
+| `CLOUDFLARE_ACCOUNT_ID` | secret | target account |
+| `TURBO_TOKEN` / `TURBO_TEAM` | secret / var | Turbo remote cache |
+
+## Staging vs production model
+
+- **`push main`** → CI builds affected apps and Direct-Uploads with `--branch=main`. Because each
+  project's production branch is `production`, these are **preview (staging)** deployments with a
+  stable staging alias per project.
+- **`push tag musclemap-v1.2.3`** → CI builds that one app and uploads with `--branch=production`,
+  which **is** the project's production branch → the **production** deployment on
+  `musclemap.neurodesk.org`.
+
+This keeps `main` as always-staging and makes production explicit, tag-gated, and per app — no global
+`v*` tag, no cross-app coupling.
 
 ## Cross-origin isolation in production
 
-Ship [`_headers`](./_headers) at each app's output root **or** include the COI service worker
-(`coi-serviceworker.js`, already in MuscleMap). Cloudflare serves `_headers` on the CDN edge, which
-is the cleaner option. Verify with the deployed `crossOriginIsolated` smoke test.
+Ship [`_headers`](./_headers) at each app's output root (Cloudflare serves it at the edge) **or**
+include the COI service worker (`coi-serviceworker.js`, already in MuscleMap). A deployed smoke test
+must assert `crossOriginIsolated === true`, workers load, and threaded ONNX executes.
+
+## Local dry run
+
+```bash
+pnpm --filter musclemap build
+pnpm exec wrangler pages deploy apps/musclemap/dist --project-name=musclemap --branch=preview
+```
