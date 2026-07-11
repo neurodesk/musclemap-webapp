@@ -1,201 +1,284 @@
 # NeuroDesk Webapps — Architecture & Migration Proposal
 
-**Status:** Proposal · **Date:** 2026-07-11 · **Owner:** @bollmann.steffen
+**Status:** RFC (revision 2 — addresses review) · **Date:** 2026-07-11 · **Owner:** @bollmann.steffen
 
-Goal: a maintainable, scalable structure for all NeuroDesk browser webapps that lets us
+Goal: a maintainable, scalable structure for the NeuroDesk browser webapps that lets us
 **reuse components across apps**, makes it **very easy to add a new app**, and treats
-**usage statistics** as a shared, built-in concern.
+**usage statistics** as a shared, privacy-safe concern.
+
+> **Revision note.** Revision 1 proposed the right shape (one monorepo, pnpm workspaces, Turbo,
+> per-app Vite, a MuscleMap pilot, a scaffold command, no app-branches/submodules) but shipped
+> example files that would race on deploy, scaffold a broken app, mis-scope the inventory, and
+> describe a statistics app that cannot exist as a static page. This revision fixes those.
+> **The example files are illustrative contracts, not drop-in production code** — each must pass the
+> CI gates described in §9 before it is trusted.
 
 ---
 
-## 1. Current state
+## 1. Current state (corrected inventory)
 
-Five webapps, all built the same way and each in its **own repo**:
+The hosted page lists **seven** webapps, and they are **not** homogeneous. Treating them as five
+identical vanilla/ONNX apps was the central factual error in revision 1.
 
-| App | Repo | What it does |
-| --- | --- | --- |
-| MuscleMap | `neurodesk/musclemap-webapp` | Muscle segmentation + fat metrics |
-| VesselBoost | `neurodesk/vesselboost-webapp` | Brain vessel segmentation (3D UNet) |
-| Spinal Cord Toolbox | `neurodesk/spinalcordtoolbox-webapp` | Spinal cord MRI segmentation |
-| CALMaR | `neurodesk/calmar-webapp` | Stroke lesion mapping + connectivity |
-| QSM | (plugin present in components) | Quantitative susceptibility mapping |
+| App | Repo / owner | Stack | Notes |
+| --- | --- | --- | --- |
+| MuscleMap | `neurodesk/musclemap-webapp` | vanilla JS · ONNX · NiiVue | classic `importScripts` workers; IMF/Dixon-fat/CSV metrics; COI service worker |
+| VesselBoost | `neurodesk/vesselboost-webapp` | vanilla JS · ONNX · NiiVue · **Rust/WASM** preproc | 3D UNet |
+| Spinal Cord Toolbox | `neurodesk/spinalcordtoolbox-webapp` | vanilla JS · ONNX · NiiVue | |
+| CALMaR | `neurodesk/calmar-webapp` | vanilla JS · ONNX · NiiVue | many pipelines, atlas logic, spatial guards |
+| QSMbly | collaborator-owned | **Rust/WASM** build; Jest + Cargo test suites | not vanilla-only |
+| SeedSeg | collaborator-owned | imaging webapp | different ownership |
+| dicompare | collaborator-owned | **React · TypeScript · Vite · Pyodide · Electron** | fundamentally different build/runtime |
 
-Shared traits: vanilla-JS ES modules, ONNX Runtime Web (in-browser inference),
-NiiVue visualization, "no backend / no upload" privacy model, static GitHub Pages hosting,
-Bash `setup.sh`/`run.sh` build scripts.
+Shared library (**prototype, not yet a verified source of truth**):
 
-A shared library **already exists** but is **not yet consumed**:
+- `@neurodesk/webapp-components` v0.1.2 — MIT, framework-free ESM. **Versioned in GitHub but not
+  published to npm** (its release workflow only runs `npm pack --dry-run`).
+- Modules: `core/ file-io/ inference/ mask/ pipeline/ ui/ viewer/ volume/`; per-app plugins
+  (synthstrip, sct, vesselboost, musclemap, lesion-network-mapping, qsm); internal `templates/`.
+- Its **app-specific plugins have already drifted** from the deployed apps (e.g. the shared
+  lesion-mapping plugin lags CALMaR's current pipelines; the shared `MetricsSummary` does not cover
+  MuscleMap's IMF/Dixon-fat/CSV output; the shared executor defaults to **module** workers while the
+  apps ship **classic `importScripts`** workers).
 
-- `@neurodesk/webapp-components` v0.1.2 (MIT, framework-free ESM).
-- Modules: `core/ file-io/ inference/ mask/ pipeline/ ui/ viewer/ volume/`.
-- Per-app **plugins**: synthstrip, sct, vesselboost, musclemap, lesion-network-mapping, qsm.
-- **Templates**: basic-segmentation, atlas-overlap, multi-echo-qsm-pipeline, step-segmentation-pipeline.
-- Has a showcase + tests.
-
-**The core problem is adoption, not extraction.** `musclemap-webapp` has no `package.json`
-and zero references to `webapp-components`; CALMaR and SCT don't reference it either.
-The right code was factored out, but the apps still ship their own copies.
+**Correct problem statement:** extraction is *partially* done and drifting. The task is not "flip
+the switch on adoption"; it is "re-extract in order of confidence, behind parity tests, sharing
+controllers/contracts while each app keeps its scientific internals."
 
 ---
 
-## 2. Options considered
+## 2. Scope decision
+
+**This RFC's migration is scoped to the four closely-related org-owned imaging apps first**
+(MuscleMap, VesselBoost, SCT, CALMaR), with QSMbly joining once its Rust/WASM build is expressed as
+a per-app build contract. **The repository is *designed* to accommodate all seven** — including
+React/TS/Pyodide/Electron (dicompare) and collaborator ownership — but SeedSeg and dicompare are
+**not** in the initial cut. They join after a Phase 0 ownership/licensing agreement (§8) and only if
+their maintainers opt in. Nothing here forces dicompare into vanilla JS or forces a single build
+system; the workspace requires only that each app expose `build`/`dev`/`test` scripts.
+
+---
+
+## 3. Options considered
 
 | Approach | Reuse | Add an app | Independent deploy | Cross-app change | Verdict |
 | --- | --- | --- | --- | --- | --- |
 | Branch-per-app in one repo | ✗ can't import across branches | painful | ✗ | merge hell | reject |
 | Git submodules for components | ⚠️ pinned SHAs, 2-step commits | ceremony | ✓ | two repos in lockstep | reject |
 | Polyrepo + published npm lib | ✓ but publish→bump→update loop | new repo each time | ✓ | multi-repo, versioned | acceptable |
-| **Monorepo + workspaces** | ✓ live local imports | ✓ scaffold a folder | ✓ CI matrix | ✓ atomic, one PR | **recommended** |
+| **Monorepo + workspaces** | ✓ live local imports | ✓ scaffold a folder | ✓ per-project deploy | ✓ atomic, one PR | **recommended** |
 
-### Why not branch-per-app
-Git branches model *versions of one thing over time*, not *parallel products*. You'd lose
-per-app issues/PRs/releases/deploys, every shared-component change becomes a cross-branch
-cherry-pick, and branches can't `import` from each other so there's no real sharing.
-
-### Why not submodules
-Submodules pin a commit SHA, so contributors must remember `git submodule update`; a component
-change needs two lockstep commits in two repos; detached-HEAD states trap people; Pages/CI builds
-get fiddly. They're for vendoring a foreign codebase, not a library you control and could just import.
+Branch-per-app and submodules are rejected for the reasons in revision 1 (branches can't `import`
+across each other and turn shared changes into cross-branch cherry-picks; submodules pin SHAs and
+force two-repo lockstep commits). Those rejections stand and are the least controversial part.
 
 ---
 
-## 3. Recommended architecture: monorepo with workspaces
-
-Keep the (correct) instinct to extract shared code into a package — but consume it as an
-**internal workspace package** so there's no publish/version friction between the library and the apps.
+## 4. Recommended architecture
 
 ```
-neurodesk-webapps/                     (one repo)
+neurodesk-webapps/                     (one repo, one main branch)
 ├── packages/
-│   └── components/                    @neurodesk/webapp-components  (the existing lib, moved in)
+│   ├── components/                    @neurodesk/webapp-components  (moved in, re-extracted incrementally)
+│   ├── analytics/                     typed telemetry allow-list + emitter (§7)
+│   └── wasm-preproc/                  optional shared Rust/WASM (vesselboost/qsmbly) if it converges
 ├── apps/
-│   ├── musclemap/                     imports @neurodesk/webapp-components
+│   ├── musclemap/                     keeps its scientific workers + IMF/Dixon/CSV renderers
 │   ├── vesselboost/
 │   ├── spinalcordtoolbox/
-│   ├── calmar/
-│   ├── qsm/
-│   └── stats/                         cross-app usage dashboard
-├── templates/                         scaffolds consumed by the "new app" generator
+│   ├── calmar/                        keeps its pipelines/atlas/spatial guards
+│   └── qsmbly/                        Rust/WASM build contract
+├── templates/
+│   └── app-template/                  SELF-CONTAINED scaffold (imports @neurodesk/webapp-components/*)
+├── models/                            manifests only — NO checked-in .onnx (§8)
 ├── scripts/new-app.mjs                pnpm new-app <name>
-├── .github/workflows/
-│   ├── ci.yml                         lint + test the whole graph on every PR
-│   └── deploy.yml                     matrix: build+deploy each app to its own Pages
-├── pnpm-workspace.yaml
-├── turbo.json                         task graph + caching
-└── package.json                       workspaces + changesets
+├── .changeset/                        independent versioning config (§6)
+├── .github/workflows/{ci,deploy}.yml
+├── pnpm-workspace.yaml · turbo.json · package.json
 ```
 
-### How this meets each goal
+### How each goal is met (with the review's constraints baked in)
 
-- **Reuse** — apps `import { createNeuroWebapp, ProgressManager } from '@neurodesk/webapp-components'`.
-  In a workspace this resolves to local source via a symlink, so edits to a component and all
-  consuming apps land in the **same PR** (atomic). CI builds the component + every app together,
-  so an app can't be silently broken.
-- **Easy to add an app** — `pnpm new-app <name>` copies a template into `apps/`, wires the shared
-  library, and the deploy matrix picks it up automatically. Adding an app is a folder, not a repo
-  provisioning ceremony.
-- **Statistics built in** — analytics live in the library (`components/analytics`, wrapping the
-  Neurodesk GA4 setup already in musclemap commit `13809d6`) so every app emits consistent events
-  by construction. `apps/stats` is then just another app that visualizes cross-app usage. A new app
-  gets analytics for free.
+- **Reuse** — apps import from `@neurodesk/webapp-components` (resolved to local source via
+  `workspace:*`), so component + consumer changes land in one atomic PR. But we share **controllers
+  and contracts**, not scientific internals: workers, metric renderers (IMF/Dixon/CSV), settings,
+  and pipeline definitions **stay in each app**. Extraction proceeds byte-identical-first, behind
+  parity tests (§5).
+- **Easy to add an app** — `pnpm new-app <name>` copies the **self-contained** `templates/app-template`
+  (see §3-generator fix) and CI proves the scaffold installs, builds, tests, and passes a browser
+  smoke test.
+- **Statistics** — a scheduled, authenticated GA4 pipeline emits sanitized aggregate JSON that a
+  static `apps/stats` renders. Telemetry is a typed allow-list that **prohibits patient-derived
+  data** (§7). No "analytics for free."
 
-### Independent GitHub Pages deploys still work
-A CI **matrix** builds each `apps/*` and publishes to its own Pages target (separate repo-pages or
-subpaths of one site). Independent deploys without independent repos. See `examples/deploy.yml`.
-
-### Versioning
-Use [Changesets](https://github.com/changesets/changesets). Internally apps track the library live;
-if we ever want external consumers, Changesets publishes `@neurodesk/webapp-components` to npm on
-release. Both worlds covered.
-
-### Tooling choice
-- **pnpm workspaces** for linking (fast, strict, disk-efficient — matters given large ONNX/WASM assets).
-- **Turborepo** for the task graph + remote caching so CI only rebuilds what changed.
-- **Vite** per app (dev server + build) replacing the ad-hoc `setup.sh`/`run.sh`, while keeping the
-  static-output / no-backend guarantee. Large model/wasm assets stay outside the bundle (served as
-  static files or fetched from Hugging Face on demand, as CALMaR already does).
+### Tooling
+- **pnpm workspaces** for linking; **Turbo** for affected-only, dependency-aware CI (§9);
+  **Vite** as each app's *build contract* (not a mandate to use React — dicompare already does, the
+  imaging apps don't). Vite replaces ad-hoc `setup.sh`/`run.sh` but the output stays fully static.
 
 ---
 
-## 4. The one honest tradeoff
+## 5. Shared/app boundary — extract in order of confidence
 
-The five repos have their own issues, stars, and release history, and there's a published package.
-A monorepo consolidates all that: archive the old repos with a pointer to the monorepo, migrate
-history with `git subtree`/`git-filter-repo` (see §6). If preserving separate repo identities matters
-more than atomic cross-app changes, the fallback is **finish polyrepo adoption**: make each app depend
-on the *published* `@neurodesk/webapp-components` via npm + import maps. Less disruptive, but it
-reintroduces the publish→bump→update loop on every shared change — exactly the friction that stalled
-adoption the first time. For a small team optimizing reuse + easy-add + shared stats, the monorepo
-consolidation is a one-time cost vs. a forever tax.
+Do **not** replace app workers and specialised UI wholesale. Extract in tiers, each gated by a
+**parity test** (same input NIfTI → byte- or tolerance-identical output vs. the currently deployed app).
 
----
+| Tier | Extract to library | Keep in app |
+| --- | --- | --- |
+| 1 — byte-identical | ModalManager, ProgressManager, ConsoleOutput, basic DICOM→NIfTI (`dcm2niix`), NIfTI read/write utils | — |
+| 2 — contracts | Controller *interfaces* (FileIO, Viewer, Inference executor **that supports classic `importScripts` workers**), NiiVue viewer wiring | app-specific worker payloads |
+| 3 — hard, maybe never | generic pieces of metrics/pipeline UI | **MuscleMap** IMF/Dixon-fat/CSV renderer; **CALMaR** pipelines/atlas/spatial guards; all **scientific workers**; per-app settings |
 
-## 5. Concrete artifacts (ready to use)
-
-All files below are provided under [`examples/`](./examples/) so they can be copied straight into the
-new repo:
-
-- [`examples/pnpm-workspace.yaml`](./examples/pnpm-workspace.yaml)
-- [`examples/root-package.json`](./examples/root-package.json)
-- [`examples/turbo.json`](./examples/turbo.json)
-- [`examples/deploy.yml`](./examples/deploy.yml) — per-app Pages deploy matrix
-- [`examples/ci.yml`](./examples/ci.yml) — lint + test the graph
-- [`examples/new-app.mjs`](./examples/new-app.mjs) — `pnpm new-app <name>` generator
-- [`examples/app-vite.config.js`](./examples/app-vite.config.js) — per-app static build config
-- [`examples/app-package.json`](./examples/app-package.json) — template app manifest
+Explicit worker rule: the shared inference executor must **support classic `importScripts` workers**
+(the apps' current form), not default to module workers. Apps keep their scientific worker code;
+the library provides the executor/lifecycle contract around it.
 
 ---
 
-## 6. Migration plan
+## 6. Versioning & releases (independent per app)
 
-### Phase 0 — Stand up the monorepo (½ day)
-1. Create `neurodesk/neurodesk-webapps`.
-2. Add root files from §5 (`pnpm-workspace.yaml`, `package.json`, `turbo.json`, CI workflows).
-3. Move `webapp-components` in with history:
-   `git subtree add --prefix=packages/components https://github.com/neurodesk/webapp-components main`
-   (or `git-filter-repo` into `packages/components/`). Keep the package name `@neurodesk/webapp-components`.
+- **Changesets with independent versioning.** Private packages are versioned too
+  (`.changeset/config.json` → `privatePackages: { version: true, tag: false }`); apps carry a real
+  `version` and are `"private": true` for deploy but still release-tracked.
+- **No single global `v*` tag.** Use **per-app tags** (`musclemap-v1.3.0`) and **path-filtered**
+  workflows so an app releases without dragging the others.
+- **Preserve staging vs production.** `main` → staging deploy for changed apps; **app tag** →
+  production deploy for that app. This mirrors the existing model instead of "deploy everything on
+  every push to main."
 
-### Phase 1 — Migrate MuscleMap as the reference app (1–2 days)
-This repo/branch is where that work is prototyped. Checklist:
-1. `git subtree`/`filter-repo` `musclemap-webapp` `web/` into `apps/musclemap/`.
-2. Add `apps/musclemap/package.json` depending on `"@neurodesk/webapp-components": "workspace:*"`.
-3. Replace duplicated modules with imports. Current duplication to delete in favor of the library:
-   - `web/js/modules/ui/*` (`ProgressManager`, `ConsoleOutput`, `ModalManager`, `MetricsSummary`, `MuscleLegend`) → `@neurodesk/webapp-components/ui`
-   - `web/js/modules/file-io/NiftiUtils.js`, `web/dcm2niix/*`, `web/nifti-js/*` → `.../file-io`
-   - `web/js/modules/inference/*` (`preprocessing`, `postprocessing`, `sliding-window`, `connected-components`) + `web/js/inference-worker.js` → `.../inference`
-   - `web/js/controllers/*` (`ViewerController`, `FileIOController`, `DicomController`, `InferenceExecutor`) → the `core` app shell / `viewer`
-   - App-specific bits (`web/js/app/labels.js`, `web/js/app/config.js`, `web/models/*.onnx`) stay in `apps/musclemap/`, wired through the `musclemap` plugin.
-4. Move analytics (`tests/test_analytics.py` behavior + GA4 from commit `13809d6`) to `components/analytics`; app just calls `trackEvent(...)`.
-5. Swap `setup.sh`/`run.sh` for `vite` (`apps/app-vite.config.js`). Verify the built `dist/` is fully static and inference still runs in-browser.
-6. Port `.github/workflows/{release,deploy-pages}.yml` into the monorepo deploy matrix.
-7. Confirm parity: same models, same outputs, `scripts/compare_inference.py` still passes.
+---
 
-### Phase 2 — Migrate the rest (per app, ~1 day each)
-Repeat Phase 1 for vesselboost, spinalcordtoolbox, calmar, qsm. Each reuses more of the library, so
-each migration is smaller than the last. VesselBoost's `rust-preprocessing/` becomes a shared
-`packages/` WASM package if other apps want it.
+## 7. Statistics — corrected architecture
 
-### Phase 3 — Statistics app (1–2 days)
-`apps/stats` reads the shared GA4 stream and renders a cross-app usage dashboard (runs, per-app volume,
-model timings). Because analytics is centralized, coverage is automatic for every current and future app.
+A browser-only `apps/stats` **cannot** "read the GA4 stream": GA4 reporting needs authenticated Data
+API access, and credentials must never live in a public static app. Correct pipeline (mirrors
+Neurodesk's existing scheduled metrics generator):
 
-### Phase 4 — Deprecate old repos
-Archive each source repo with a README pointer to the monorepo. Redirect Pages or keep old URLs live
-until the monorepo deploys are verified.
-
-### Adding a *new* app after migration
 ```
-pnpm new-app cerebellum      # scaffolds apps/cerebellum from a template, wired to the lib + analytics
-pnpm --filter cerebellum dev # local dev
-# open a PR — CI tests it, deploy matrix publishes it to Pages
+GA4  →  authenticated scheduled workflow (secrets in CI)  →  sanitized aggregate JSON (committed/published)  →  static apps/stats reads JSON
 ```
 
+**Typed telemetry allow-list** (`packages/analytics`). Only these leave the browser, all
+non-identifying:
+
+- app id, app version, event name (from a fixed enum), coarse timing buckets, boolean feature flags,
+  browser/OS class, run success/failure.
+
+**Explicitly prohibited** (never emitted, never logged): filenames, DICOM metadata/tags, image
+dimensions, voxel values, any scientific measurement or segmentation, screenshots, and free-text
+logs. These are patient-data applications; telemetry is an allow-list, not a denylist.
+
 ---
 
-## 7. Open decisions for @bollmann.steffen
+## 8. Assets, licensing & ownership — a real Phase 0
 
-1. **Direction** — monorepo (recommended) vs. finish polyrepo adoption?
-2. **Pages layout** — one site with per-app subpaths (`neurodesk.github.io/webapps/musclemap`) vs.
-   keep per-app Pages sites/domains?
-3. **Preserve old repos** — archive-with-pointer, or keep them as thin mirrors?
-4. **Bundler** — adopt Vite (recommended) or keep the current script-based static serving?
+- **Externalize models before importing histories.** pnpm does not fix large checked-in `.onnx`
+  blobs. Define an **immutable model manifest** per app (`models/<app>.manifest.json`: `url`,
+  `sha256`, `bytes`, `license`, `preprocessing_contract`) and fetch on demand (Hugging Face /
+  releases), as CALMaR already does. Do **not** `git subtree` full histories that carry large
+  binaries — filter them out first.
+- **Licensing.** Several source repos lack a top-level licence. Resolve licences (apps + models +
+  atlases) before consolidating; a monorepo with mixed/absent licences is worse than the status quo.
+- **Ownership.** QSMbly, SeedSeg, dicompare are collaborator-owned. Consolidation needs their
+  maintainers' consent and a contribution/ownership agreement; until then they stay external and are
+  only *referenced* by the deploy/registry, not moved.
+
+---
+
+## 9. CI/CD — corrected
+
+### Build/test
+- **Affected-only.** CI runs `turbo run … --filter=…[origin/main]` with **remote cache**, so a fresh
+  runner does *not* execute the whole graph (revision 1's `ci.yml` did).
+- **Per-package test tasks, not global `node --test`.** Each package declares its own `test`:
+  MuscleMap runs its **pytest** suite, QSMbly runs **Jest + Cargo**, JS packages run their unit
+  tests. Turbo fans out to each; nothing is silently skipped.
+- **Deploy through Turbo** (`turbo run build --filter=<app>`), not raw `pnpm --filter … build`, so
+  caching and task deps apply.
+
+### Deployment — must not race
+Revision 1 called `deploy-pages` once per matrix job, all targeting the **same** repo Pages site;
+they race and overwrite, and `base: /musclemap/` does not place the artifact under that directory.
+Two correct options:
+
+- **Preferred — Cloudflare Pages, one project per app from the monorepo.** Cloudflare explicitly
+  supports multiple projects from a single monorepo (per-project *root directory* + *build watch
+  paths*). This preserves each `*.neurodesk.org` domain and gives independent deploys with no racing.
+  See [`examples/deploy.cloudflare.md`](./examples/deploy.cloudflare.md) and
+  [`examples/_headers`](./examples/_headers) (production COOP/COEP).
+- **Fallback — single GitHub Pages artifact.** Build all changed apps in parallel, **assemble one
+  artifact** with `/musclemap/`, `/calmar/`, … subdirectories, then call `deploy-pages` **once**.
+  See [`examples/deploy.github-pages.yml`](./examples/deploy.github-pages.yml).
+
+### Cross-origin isolation in production (not just dev)
+Vite's `server.headers` COOP/COEP apply only to the **dev** server. Production must serve COOP/COEP
+via the host (Cloudflare `_headers`) **or** ship the existing **COI service worker**
+(`coi-serviceworker.js`, already in MuscleMap). A **deployed** smoke test must assert
+`crossOriginIsolated === true`, workers load, and threaded ONNX executes — otherwise inference
+silently falls back or breaks.
+
+---
+
+## 10. Concrete artifacts
+
+Under [`examples/`](./examples/) — **contracts to validate, not trusted production code**:
+
+- `pnpm-workspace.yaml`, `root-package.json`, `turbo.json`
+- `ci.yml` — affected-only + remote cache + per-package tests
+- `deploy.cloudflare.md` + `_headers` — preferred deploy, production COOP/COEP
+- `deploy.github-pages.yml` — fallback single-artifact deploy (no race)
+- `new-app.mjs` + `app-template/` — **self-contained** scaffold using `@neurodesk/webapp-components/*`
+- `changeset-config.json` — independent versioning incl. private packages
+- `models.manifest.json` — externalized model contract
+- `telemetry-allowlist.js` — typed, patient-data-safe allow-list
+
+---
+
+## 11. Migration plan
+
+### Phase 0 — Licensing, ownership, assets (blocking)
+Resolve licences on all in-scope repos/models/atlases; get collaborator consent for QSMbly/SeedSeg/
+dicompare (or defer them); define model manifests and strip large binaries from any history to be
+imported. Stand up the empty monorepo (root config, CI, Changesets, Cloudflare projects) with **no
+apps** yet.
+
+### Phase 1 — MuscleMap pilot (behind parity tests)
+1. Import `web/` history **without** `.onnx` blobs; add `models/musclemap.manifest.json`.
+2. Move `webapp-components` into `packages/components`.
+3. Extract **Tier 1 only** (modal, progress, console, DICOM convert, NIfTI utils); replace in
+   MuscleMap; assert parity (`scripts/compare_inference.py` + output-diff) before deleting originals.
+4. Keep MuscleMap's classic workers, IMF/Dixon-fat/CSV renderer, and settings in the app.
+5. Add `packages/analytics` allow-list; wire MuscleMap; confirm no prohibited fields emit.
+6. Swap `setup.sh`/`run.sh` for Vite; ship COI service worker (or Cloudflare `_headers`); add the
+   deployed `crossOriginIsolated` smoke test.
+7. Deploy via one Cloudflare project; verify `musclemap.neurodesk.org` parity.
+
+### Phase 2 — VesselBoost, SCT, CALMaR, then QSMbly
+Repeat Phase 1 per app, moving up the tiers only as parity holds. CALMaR keeps its
+pipelines/atlas/spatial guards; VesselBoost/QSMbly express their Rust/WASM as a per-app build (shared
+`packages/wasm-preproc` only if it genuinely converges). Each app gets its own Cloudflare project.
+
+### Phase 3 — Statistics
+Ship the scheduled GA4→JSON workflow and the static `apps/stats` reading sanitized aggregates.
+
+### Phase 4 — Optional: SeedSeg, dicompare
+Only with owner consent. dicompare joins as a **React/TS/Vite/Pyodide/Electron** app — proof the
+workspace tolerates heterogeneous stacks — sharing contracts/telemetry, not vanilla-JS internals.
+
+### Adding a new app afterwards
+```
+pnpm new-app cerebellum        # self-contained scaffold, wired to the lib + analytics allow-list
+pnpm --filter cerebellum dev
+# open a PR — CI installs, builds, tests, and browser-smoke-tests the scaffold; deploy adds a project
+```
+
+---
+
+## 12. Open decisions for @bollmann.steffen
+
+1. **Deploy host** — Cloudflare Pages projects per app (recommended, keeps `*.neurodesk.org`) vs.
+   single-artifact GitHub Pages?
+2. **Initial scope** — four org imaging apps now (recommended) vs. push for all seven up front?
+3. **Collaborator apps** — pursue consent for QSMbly/SeedSeg/dicompare now, or design-only for later?
+4. **Publish the library to npm** eventually, or keep it workspace-internal indefinitely?
+5. **Models** — Hugging Face vs. GitHub Releases as the immutable model host?

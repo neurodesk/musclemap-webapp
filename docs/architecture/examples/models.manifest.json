@@ -1,0 +1,22 @@
+{
+  "// purpose": "Externalized model contract. NO .onnx is committed to the monorepo.",
+  "// purpose2": "pnpm/workspaces do not solve large binaries — models are fetched + verified at runtime.",
+  "app": "musclemap",
+  "models": [
+    {
+      "id": "musclemap-thigh",
+      "url": "https://huggingface.co/neurodesk/musclemap/resolve/v1.2.37/musclemap-thigh.onnx",
+      "sha256": "REPLACE_WITH_REAL_SHA256",
+      "bytes": 0,
+      "license": "REPLACE_WITH_MODEL_LICENSE",
+      "preprocessing_contract": {
+        "orientation": "RAS",
+        "spacing_mm": [1.0, 1.0, 1.0],
+        "intensity": "zscore",
+        "patch": [64, 64, 64],
+        "notes": "Must match the app worker's preprocessing exactly; parity test guards this."
+      }
+    }
+  ],
+  "// integrity": "Loader MUST verify sha256 + bytes before use and refuse on mismatch (immutable, pinned by tag)."
+}

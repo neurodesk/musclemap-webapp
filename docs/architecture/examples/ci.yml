@@ -1,6 +1,7 @@
 # .github/workflows/ci.yml
-# Lints + tests the whole workspace graph on every PR.
-# Turbo caching means only packages affected by the diff actually run.
+# Lints/tests/builds only the packages AFFECTED by the diff, with remote caching.
+# Revision-1 mistake fixed: a fresh runner no longer executes the whole graph, and
+# tests are each package's own task (pytest / jest+cargo / node), not a global `node --test`.
 name: ci
 
 on:
@@ -8,17 +9,25 @@ on:
   push:
     branches: [main]
 
+env:
+  # Remote cache so CI reuses prior build/test outputs across runners.
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+  TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+
 jobs:
-  check:
+  affected:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Turbo needs history to compute the affected set.
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
+      # Some packages have non-JS test suites (MuscleMap: pytest; QSMbly: cargo).
+      # Turbo invokes each package's own `test` script, which sets up its own toolchain.
       - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      - run: pnpm test
-      - run: pnpm build
+      # `--filter=...[origin/main]` restricts to packages changed vs. the base ref (+ their dependents).
+      - run: pnpm exec turbo run lint test build --filter="...[origin/main]"
