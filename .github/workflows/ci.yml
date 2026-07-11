@@ -17,14 +17,15 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: pnpm }
+        with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       # Syntax/lint for every package that defines a lint task (apps: acorn; analytics: node --check).
       - run: pnpm exec turbo run lint
       # Light, deterministic unit tests (parity + telemetry allow-list + shared library).
       - run: pnpm --filter musclemap run test
       - run: pnpm --filter @neurodesk/analytics run test
-      - run: pnpm --filter @neurodesk/webapp-components run test
+      # Unit tests only — the library's full `test` also runs a browser showcase step.
+      - run: pnpm --filter @neurodesk/webapp-components run test:unit
 
   e2e:
     runs-on: ubuntu-latest
@@ -36,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: pnpm }
+        with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       # GitHub runners don't ship the browser; install the Chromium matching the pinned runner.
       - run: pnpm exec playwright install --with-deps chromium
