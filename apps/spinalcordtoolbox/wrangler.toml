@@ -1,0 +1,5 @@
+# Cloudflare Pages project (Direct Upload). spinalcordtoolbox is native-ESM (no bundler):
+# deployable output is the assembled static dir from `pnpm build`.
+name = "spinalcordtoolbox"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-07-11"

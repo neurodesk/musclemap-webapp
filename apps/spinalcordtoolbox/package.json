@@ -24,16 +24,26 @@
     "test:inference:e2e": "node scripts/test_inference_worker_e2e.cjs",
     "test:worker:protocol": "node scripts/test_inference_worker_protocol.cjs",
     "test:server": "bash scripts/test_run_server_restart.sh",
-    "test:ci-summary": "node scripts/test_summarize_test_failures.cjs"
+    "test:ci-summary": "node scripts/test_summarize_test_failures.cjs",
+    "vendor": "node ../../scripts/vendor-components.mjs",
+    "predev": "pnpm vendor",
+    "dev": "bash web/run.sh",
+    "prebuild": "pnpm vendor && bash web/setup.sh",
+    "build": "node ../../scripts/build-static.mjs",
+    "pretest:e2e": "pnpm vendor",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "nifti-reader-js": "^0.8.0",
-    "onnxruntime-node": "^1.24.3"
+    "onnxruntime-node": "^1.24.3",
+    "@neurodesk/webapp-components": "workspace:*"
   },
   "devDependencies": {
-    "acorn": "^8.16.0"
+    "acorn": "^8.16.0",
+    "@playwright/test": "^1.44.0"
   },
   "name": "spinalcordtoolbox",
   "version": "0.0.0",
-  "private": true
+  "private": true,
+  "type": "module"
 }

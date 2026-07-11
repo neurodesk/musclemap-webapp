@@ -1,6 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <!-- Resolve shared @neurodesk/webapp-components (workspace package) for the browser without a
+       bundler; vendored into web/vendor/ by `pnpm vendor` (prebuild). Leaves the app's worker
+       and relative asset paths untouched. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@neurodesk/webapp-components": "./vendor/webapp-components/src/index.js",
+      "@neurodesk/webapp-components/ui": "./vendor/webapp-components/src/ui/index.js",
+      "@neurodesk/webapp-components/": "./vendor/webapp-components/src/"
+    }
+  }
+  </script>
+
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VesselBoost - Blood Vessel Segmentation</title>

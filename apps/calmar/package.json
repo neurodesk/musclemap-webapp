@@ -46,15 +46,24 @@
     "test:real-data-bridge": "node --no-warnings scripts/test_real_data_bridge.mjs",
     "test:real-data-pca": "node --no-warnings scripts/test_real_data_pca.mjs",
     "test:deploy-budget": "node scripts/test_deploy_budget.cjs",
-    "test:manifest-checksums": "node scripts/test_manifest_checksums.cjs"
+    "test:manifest-checksums": "node scripts/test_manifest_checksums.cjs",
+    "vendor": "node ../../scripts/vendor-components.mjs",
+    "predev": "pnpm vendor",
+    "dev": "bash web/run.sh",
+    "prebuild": "pnpm vendor && bash web/setup.sh",
+    "build": "node ../../scripts/build-static.mjs",
+    "pretest:e2e": "pnpm vendor",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "nifti-reader-js": "^0.8.0",
-    "onnxruntime-node": "^1.24.3"
+    "onnxruntime-node": "^1.24.3",
+    "@neurodesk/webapp-components": "workspace:*"
   },
   "devDependencies": {
     "acorn": "^8.16.0",
-    "playwright": "^1.49.0"
+    "playwright": "^1.49.0",
+    "@playwright/test": "^1.44.0"
   },
   "version": "0.0.0"
 }

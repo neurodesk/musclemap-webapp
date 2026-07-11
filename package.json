@@ -2,7 +2,7 @@
   "name": "neurodesk-webapps",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@9",
+  "packageManager": "pnpm@10.33.0",
   "engines": { "node": ">=20" },
   "scripts": {
     "dev": "turbo run dev",

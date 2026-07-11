@@ -5,11 +5,11 @@
   "type": "module",
   "description": "MuscleMap — in-browser muscle segmentation and fat metrics.",
   "scripts": {
-    "vendor": "node scripts/vendor-components.mjs",
+    "vendor": "node ../../scripts/vendor-components.mjs",
     "predev": "pnpm vendor",
     "dev": "bash web/run.sh",
     "prebuild": "pnpm vendor && bash web/setup.sh",
-    "build": "node scripts/build-static.mjs",
+    "build": "node ../../scripts/build-static.mjs",
     "pretest:e2e": "pnpm vendor",
     "test": "node --test test/*.test.js",
     "test:e2e": "playwright test",
