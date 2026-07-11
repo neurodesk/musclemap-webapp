@@ -40,28 +40,32 @@ docs/architecture/      the architecture RFC + validated example configs
 See [`docs/architecture/webapps-monorepo-proposal.md`](docs/architecture/webapps-monorepo-proposal.md)
 for the full rationale, the shared/app boundary, and the migration plan.
 
-## Phase 1 progress (MuscleMap pilot)
+## Status: all four org apps wired and installable
 
-- MuscleMap is now a **workspace package** depending on `@neurodesk/webapp-components`.
-- First Tier-1 component extracted: **`ProgressManager`** now comes from the shared library, behind a
-  **parity test** (`apps/musclemap/test/ui-progress-parity.test.js`, shared ≡ archived original) and a
-  **browser test** (`apps/musclemap/e2e/`) proving the wiring in Chromium.
-- Interim wiring mechanism: a native-ESM **import map** + a vendored copy of the library
-  (`pnpm --filter musclemap vendor`), which **preserves the classic `importScripts` inference worker
-  and relative asset paths untouched** — no bundler cutover, no worker migration. Full Vite bundling
-  remains a later option and must keep the classic worker working.
+- **`pnpm install` works** across the whole workspace (7 projects); the lockfile is committed.
+- **All four apps are workspace packages** (`musclemap`, `vesselboost`, `spinalcordtoolbox`, `calmar`),
+  each depending on `@neurodesk/webapp-components`, with consistent scripts
+  (`vendor`/`dev`/`build`/`test:e2e`), a native-ESM **import map**, production `_headers`, and a
+  `wrangler.toml`. Shared `vendor`/`build` logic lives in `scripts/`.
+- **Wiring is proven in a real browser** for every app: a Playwright harness asserts the import map
+  resolves `@neurodesk/webapp-components` in Chromium (`apps/*/e2e/`).
+- **CI is active** (`.github/workflows/ci.yml`): `turbo run lint`, light unit tests (MuscleMap parity,
+  analytics allow-list), and the per-app browser smoke matrix.
+- **First real extraction (MuscleMap pilot):** `ProgressManager` now comes from the shared library,
+  behind a **parity test** (`apps/musclemap/test/ui-progress-parity.test.js`, shared ≡ archived
+  original). The interim wiring is a native-ESM import map + a vendored copy of the library, which
+  **preserves the classic `importScripts` inference worker and relative asset paths untouched** — no
+  bundler cutover, no worker migration.
 
 ## Not yet done (tracked follow-ups)
 
-- Extract the remaining Tier-1 components (ConsoleOutput, ModalManager, DICOM→NIfTI, NIfTI utils) the
-  same way, each behind a parity test; note MuscleMap's `ConsoleOutput`/`ModalManager` have **drifted**
-  from the library and need reconciliation, not a blind swap.
-- Convert each app to a Vite workspace package (`build`/`dev`/`test`) if/when the bundler tradeoffs are
-  worth it; replace per-app `setup.sh`/`run.sh`.
-- Commit a full `pnpm-lock.yaml` once every app is installable (the other apps pull `onnxruntime-node`
-  and aren't yet converted).
-- Activate the monorepo CI + Cloudflare deploy workflows (kept under `docs/architecture/examples/`
-  until the Cloudflare projects and secrets exist).
-- Externalize model binaries to the manifests in `models/` (they are currently still committed inside
-  each app's `web/models/` as in the original repos).
+- Extract more Tier-1 components (ConsoleOutput, ModalManager, DICOM→NIfTI, NIfTI utils) the same way,
+  each behind a parity test; MuscleMap's `ConsoleOutput`/`ModalManager` have **drifted** from the
+  library and need reconciliation, not a blind swap. So far only `ProgressManager` is extracted; the
+  other apps have the wiring in place but still use their own local modules.
+- Run each app's own heavy test suite in CI (needs fixtures + `onnxruntime-node` native build).
+- **Cloudflare deploy** (`docs/architecture/examples/deploy.cloudflare.yml`) activates once the
+  Pages projects and `CLOUDFLARE_API_TOKEN`/`ACCOUNT_ID` secrets exist.
+- Optionally convert apps to a Vite bundle (must keep the classic worker working); externalize model
+  binaries to the `models/` manifests.
 - Collaborator-owned apps (QSMbly, SeedSeg, dicompare) join after a licensing/ownership agreement.
