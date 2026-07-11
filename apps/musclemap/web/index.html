@@ -6,6 +6,18 @@
   <title>MuscleMap - Whole-Body Muscle Segmentation</title>
   <link rel="icon" type="image/png" href="img/musclemap-favicon.png" sizes="64x64">
   <link rel="stylesheet" href="css/styles.css">
+  <!-- Resolve shared @neurodesk/webapp-components (workspace package) for the browser without a
+       bundler. Files are vendored into web/vendor/ by `pnpm --filter musclemap vendor` (prebuild).
+       This keeps the classic importScripts inference worker and relative asset paths untouched. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@neurodesk/webapp-components": "./vendor/webapp-components/src/index.js",
+      "@neurodesk/webapp-components/ui": "./vendor/webapp-components/src/ui/index.js",
+      "@neurodesk/webapp-components/": "./vendor/webapp-components/src/"
+    }
+  }
+  </script>
 </head>
 <body>
 

@@ -1,0 +1,6 @@
+# Cloudflare Pages project config (Direct Upload).
+# MuscleMap is still native-ESM (no bundler): the deployable output is the assembled
+# static dir produced by `pnpm build` (web/ + vendored components + ORT wasm).
+name = "musclemap"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-07-11"

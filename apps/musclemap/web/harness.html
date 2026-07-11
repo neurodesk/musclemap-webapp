@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>MuscleMap e2e harness (test-only)</title>
+  <!-- Same import map as index.html: resolve the shared workspace package for the browser. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@neurodesk/webapp-components": "./vendor/webapp-components/src/index.js",
+      "@neurodesk/webapp-components/ui": "./vendor/webapp-components/src/ui/index.js",
+      "@neurodesk/webapp-components/": "./vendor/webapp-components/src/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="progressBar" style="width:0%"></div>
+  <script type="module">
+    import { ProgressManager } from '@neurodesk/webapp-components/ui';
+    const pm = new ProgressManager({ animationSpeed: 0.5 });
+    pm.setProgress(0.5); // MuscleMap's used surface: value in [0,1] -> "#progressBar" width
+    window.__fromSharedPackage = pm instanceof ProgressManager;
+    window.__ready = true;
+  </script>
+</body>
+</html>

@@ -9,7 +9,7 @@ import { DicomController } from './controllers/DicomController.js?v=1.2.35';
 import { ViewerController } from './controllers/ViewerController.js?v=1.2.35';
 import { InferenceExecutor } from './controllers/InferenceExecutor.js';
 import { ConsoleOutput } from './modules/ui/ConsoleOutput.js?v=1.2.35';
-import { ProgressManager } from './modules/ui/ProgressManager.js';
+import { ProgressManager } from '@neurodesk/webapp-components/ui';
 import { ModalManager } from './modules/ui/ModalManager.js';
 import { MuscleLegend } from './modules/ui/MuscleLegend.js';
 import { MetricsSummary } from './modules/ui/MetricsSummary.js';

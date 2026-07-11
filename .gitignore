@@ -11,6 +11,9 @@ test-results/
 # WASM files (downloaded by per-app setup.sh)
 apps/*/web/wasm/
 
+# Vendored shared components (generated from packages/components by each app's vendor script)
+apps/*/web/vendor/
+
 # OS files
 .DS_Store
 Thumbs.db
