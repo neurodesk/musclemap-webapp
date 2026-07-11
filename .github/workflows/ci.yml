@@ -1,0 +1,44 @@
+# Monorepo CI. Runs lint + light unit tests for the whole workspace and a per-app
+# browser smoke test (import map resolves the shared components in a real browser).
+# The apps' own heavy suites (which need fixtures / onnxruntime-node native) are not
+# run here yet; see each app's test:* scripts.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # Syntax/lint for every package that defines a lint task (apps: acorn; analytics: node --check).
+      - run: pnpm exec turbo run lint
+      # Light, deterministic unit tests (parity + telemetry allow-list).
+      - run: pnpm --filter musclemap run test
+      - run: pnpm --filter @neurodesk/analytics run test
+
+  e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [musclemap, vesselboost, spinalcordtoolbox, calmar]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # GitHub runners don't ship the browser; install the Chromium matching the pinned runner.
+      - run: pnpm exec playwright install --with-deps chromium
+      # Vendors shared components, serves web/ with COOP/COEP, and asserts the import map
+      # resolves @neurodesk/webapp-components in-browser.
+      - run: pnpm --filter ${{ matrix.app }} run test:e2e

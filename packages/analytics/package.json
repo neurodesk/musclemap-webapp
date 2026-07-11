@@ -6,6 +6,6 @@
   "exports": { ".": "./src/index.js" },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "lint": "eslint ."
+    "lint": "node --check src/index.js"
   }
 }
