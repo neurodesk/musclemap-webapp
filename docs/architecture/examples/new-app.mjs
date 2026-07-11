@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // scripts/new-app.mjs
-// Scaffold a SELF-CONTAINED app into apps/<name> from templates/app-template.
+// Scaffold a SELF-CONTAINED app into apps/<name> from templates/app-template and
+// register it in registry/apps.yml (the deploy/statistics source of truth).
 //
 //   pnpm new-app <name>
 //
-// Revision-1 mistakes fixed:
-//   - copies the self-contained templates/app-template (which imports @neurodesk/webapp-components/*
-//     by package name), NOT packages/components/templates/* (those import ../../src and break on copy);
-//   - the template ships its own package.json, vite.config.js, eslint.config.js, and a test;
-//   - fails LOUDLY if a required file is missing instead of silently skipping.
-import { cp, readFile, writeFile, access, readdir } from "node:fs/promises";
+// The template imports @neurodesk/webapp-components/* and @neurodesk/analytics by
+// package name (not ../../src), ships its own package.json/vite/eslint/wrangler config,
+// a DOM-independent Node test, and a Playwright browser test. Missing template files
+// abort loudly instead of being silently skipped.
+import { cp, readFile, writeFile, access, readdir, appendFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const name = process.argv[2];
@@ -21,6 +21,7 @@ if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) {
 const root = process.cwd();
 const dest = join(root, "apps", name);
 const src = join(root, "templates", "app-template");
+const registry = join(root, "registry", "apps.yml");
 
 // Destination must be free.
 try {
@@ -37,8 +38,13 @@ const REQUIRED = [
   "vite.config.js",
   "eslint.config.js",
   "wrangler.toml",
+  "playwright.config.js",
   "index.html",
+  "public/_headers",
   "src/main.js",
+  "src/config.js",
+  "test/config.test.js",
+  "e2e/smoke.spec.js",
 ];
 for (const f of REQUIRED) {
   try {
@@ -65,7 +71,17 @@ async function stamp(dir) {
 }
 await stamp(dest);
 
-console.log(`Created apps/${name}. Next:`);
+// Register the app so deploy + statistics workflows pick it up.
+const entry =
+  `  - id: ${name}\n` +
+  `    domain: ${name}.neurodesk.org\n` +
+  `    cloudflare_project: ${name}\n` +
+  `    ga4_measurement_id: "" # fill in\n` +
+  `    model_manifest: models/${name}.manifest.json\n` +
+  `    owner: neurodesk\n`;
+await appendFile(registry, entry);
+
+console.log(`Created apps/${name} and registered it in registry/apps.yml. Next:`);
 console.log(`  pnpm install`);
 console.log(`  pnpm --filter ${name} dev`);
-console.log(`CI will install, build, test, and browser-smoke-test this app on your PR.`);
+console.log(`CI installs, builds, runs unit + Playwright browser tests, and checks crossOriginIsolated.`);

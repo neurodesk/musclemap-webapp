@@ -40,9 +40,10 @@ This keeps `main` as always-staging and makes production explicit, tag-gated, an
 
 ## Cross-origin isolation in production
 
-Ship [`_headers`](./_headers) at each app's output root (Cloudflare serves it at the edge) **or**
-include the COI service worker (`coi-serviceworker.js`, already in MuscleMap). A deployed smoke test
-must assert `crossOriginIsolated === true`, workers load, and threaded ONNX executes.
+Each scaffolded app ships [`public/_headers`](./app-template/public/_headers), which Vite copies to
+`dist/_headers` and Cloudflare serves at the edge (or use the COI service worker
+`coi-serviceworker.js`, already in MuscleMap). The app's Playwright test asserts
+`crossOriginIsolated === true`, a worker loads, and the app boots.
 
 ## Local dry run
 

@@ -1,6 +1,6 @@
 # NeuroDesk Webapps — Architecture & Migration Proposal
 
-**Status:** RFC (revision 3) · **Date:** 2026-07-11 · **Owner:** @bollmann.steffen
+**Status:** RFC (revision 4) · **Date:** 2026-07-11 · **Owner:** @bollmann.steffen
 
 **Decided:** deploy host is **Cloudflare Pages — one project per app from this monorepo** (open
 decision #1 resolved by @bollmann.steffen). The GitHub Pages single-artifact fallback is dropped.
@@ -93,8 +93,9 @@ neurodesk-webapps/                     (one repo, one main branch)
 │   └── qsmbly/                        Rust/WASM build contract
 ├── templates/
 │   └── app-template/                  SELF-CONTAINED scaffold (imports @neurodesk/webapp-components/*)
+├── registry/apps.yml                  SOURCE OF TRUTH: app id, domain, CF project, GA4 id, manifest
 ├── models/                            manifests only — NO checked-in .onnx (§8)
-├── scripts/new-app.mjs                pnpm new-app <name>
+├── scripts/new-app.mjs                pnpm new-app <name> (also registers the app in registry/apps.yml)
 ├── .changeset/                        independent versioning config (§6)
 ├── .github/workflows/{ci,deploy}.yml
 ├── pnpm-workspace.yaml · turbo.json · package.json
@@ -108,11 +109,14 @@ neurodesk-webapps/                     (one repo, one main branch)
   and pipeline definitions **stay in each app**. Extraction proceeds byte-identical-first, behind
   parity tests (§5).
 - **Easy to add an app** — `pnpm new-app <name>` copies the **self-contained** `templates/app-template`
-  (see §3-generator fix) and CI proves the scaffold installs, builds, tests, and passes a browser
-  smoke test.
+  and registers the app in `registry/apps.yml`. A CI **generator-contract** job scaffolds a throwaway
+  app and proves it installs, lints, unit-tests, and **builds**; a **browser** job runs the app's
+  Playwright test (app boot + `crossOriginIsolated` + worker load).
 - **Statistics** — a scheduled, authenticated GA4 pipeline emits sanitized aggregate JSON that a
-  static `apps/stats` renders. Telemetry is a typed allow-list that **prohibits patient-derived
-  data** (§7). No "analytics for free."
+  static `apps/stats` renders. Telemetry is a typed allow-list that **validates values (type, enum,
+  length, app/version pattern; no nested objects)** and **prohibits patient-derived data**; it is
+  **off unless consent is granted and Do-Not-Track is unset**, and GA4 is not loaded when disabled
+  (§7). No "analytics for free."
 
 ### Tooling
 - **pnpm workspaces** for linking; **Turbo** for affected-only, dependency-aware CI (§9);
@@ -161,11 +165,20 @@ Neurodesk's existing scheduled metrics generator):
 GA4  →  authenticated scheduled workflow (secrets in CI)  →  sanitized aggregate JSON (committed/published)  →  static apps/stats reads JSON
 ```
 
-**Typed telemetry allow-list** (`packages/analytics`). Only these leave the browser, all
-non-identifying:
+**Typed telemetry allow-list** (`packages/analytics`, supplied in `examples/`). Only these leave the
+browser, all non-identifying:
 
 - app id, app version, event name (from a fixed enum), coarse timing buckets, boolean feature flags,
   browser/OS class, run success/failure.
+
+**Values are validated, not just keys.** `sanitize()` drops any prop that is a non-primitive
+(object/array/null), fails its per-key check (exact enum membership, `app`/`app_version` regex,
+string length ≤ 32), or is unknown; unknown event names throw. Unit tests in
+`examples/packages/analytics/test/` cover these cases.
+
+**Consent & Do-Not-Track.** Telemetry is **off by default**: `track()` no-ops and GA4 is never even
+loaded unless consent is stored **and** `navigator.doNotTrack`/GPC is unset. Consent state is surfaced
+in each app's UI.
 
 **Explicitly prohibited** (never emitted, never logged): filenames, DICOM metadata/tags, image
 dimensions, voxel values, any scientific measurement or segmentation, screenshots, and free-text
@@ -215,7 +228,8 @@ project**, deployed by CI via **Direct Upload** (`wrangler pages deploy`):
   So `main` is always staging and production is tag-gated, per app.
 - See [`examples/deploy.cloudflare.yml`](./examples/deploy.cloudflare.yml) (the CI workflow),
   [`examples/deploy.cloudflare.md`](./examples/deploy.cloudflare.md) (project + secrets setup), and
-  [`examples/_headers`](./examples/_headers) (production COOP/COEP served at the edge).
+  [`examples/app-template/public/_headers`](./examples/app-template/public/_headers) (production
+  COOP/COEP served at the edge — shipped inside every scaffolded app so it actually reaches `dist/`).
 
 Required repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (plus `TURBO_TOKEN`/`TURBO_TEAM`
 for remote cache). Each app ships a `wrangler.toml` naming its Pages project.
@@ -231,17 +245,22 @@ silently falls back or breaks.
 
 ## 10. Concrete artifacts
 
-Under [`examples/`](./examples/) — **contracts to validate, not trusted production code**:
+Under [`examples/`](./examples/) — **contracts to validate, not trusted production code**. The JS,
+JSON and YAML all parse, the analytics unit tests pass, and the generator has been run end-to-end
+(scaffolds a complete app + updates the registry); the browser/e2e behaviour is asserted by CI:
 
-- `pnpm-workspace.yaml`, `root-package.json`, `turbo.json`
-- `ci.yml` — affected-only + remote cache + per-package tests
-- `deploy.cloudflare.yml` — CI: Turbo build + `wrangler pages deploy` per app, staging/prod split
-- `deploy.cloudflare.md` + `_headers` — project/secrets setup, production COOP/COEP
-- `new-app.mjs` + `app-template/` — **self-contained** scaffold using `@neurodesk/webapp-components/*`,
-  ships its own `wrangler.toml`
+- `pnpm-workspace.yaml`, `root-package.json` (root `wrangler`/`@playwright/test`), `turbo.json`
+- `registry/apps.yml` — **source of truth** (app id · domain · Cloudflare project · GA4 id · manifest)
+- `ci.yml` — affected via `TURBO_SCM_BASE/HEAD` (event-specific SHAs) + generator-contract + browser jobs
+- `deploy.cloudflare.yml` — Turbo build + `wrangler pages deploy` per app; affected-with-dependents
+  discovery intersected with the registry; staging/prod split; `workflow_dispatch` + tag both validated
+- `deploy.cloudflare.md` — project/secrets setup
+- `new-app.mjs` + `app-template/` — **self-contained** scaffold (imports `@neurodesk/webapp-components/*`
+  and `@neurodesk/analytics`); ships `wrangler.toml`, `public/_headers`, a Node unit test and a
+  Playwright browser test; registers the app in `registry/apps.yml`
+- `packages/analytics/` — supplied package: value-validating allow-list + consent/DNT gating + tests
 - `changeset-config.json` — independent versioning incl. private packages
-- `models.manifest.json` — externalized model contract
-- `telemetry-allowlist.js` — typed, patient-data-safe allow-list
+- `models.manifest.json` — externalized model contract (MuscleMap's real 2D, native-z contract)
 
 ---
 
