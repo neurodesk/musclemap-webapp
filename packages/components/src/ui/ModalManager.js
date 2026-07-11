@@ -1,5 +1,7 @@
 export class ModalManager {
   constructor(options = {}) {
+    // Back-compat: accept a plain element-id string (e.g. new ModalManager('aboutModal')).
+    if (typeof options === 'string') options = { modalId: options };
     this.element = resolveTarget(options.element || options.modalId);
     this.closeOnOverlayClick = options.closeOnOverlayClick ?? true;
     this.activeClass = options.activeClass || 'active';

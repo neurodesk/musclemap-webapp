@@ -8,9 +8,9 @@ import { FileIOController } from './controllers/FileIOController.js';
 import { DicomController } from './controllers/DicomController.js?v=1.2.35';
 import { ViewerController } from './controllers/ViewerController.js?v=1.2.35';
 import { InferenceExecutor } from './controllers/InferenceExecutor.js';
-import { ConsoleOutput } from './modules/ui/ConsoleOutput.js?v=1.2.35';
+import { ConsoleOutput } from '@neurodesk/webapp-components/ui';
 import { ProgressManager } from '@neurodesk/webapp-components/ui';
-import { ModalManager } from './modules/ui/ModalManager.js';
+import { ModalManager } from '@neurodesk/webapp-components/ui';
 import { MuscleLegend } from './modules/ui/MuscleLegend.js';
 import { MetricsSummary } from './modules/ui/MetricsSummary.js';
 import { FallbackNiftiPreview } from './modules/fallback-nifti-preview.js';
@@ -33,7 +33,24 @@ class MuscleMapApp {
     });
 
     // UI modules
-    this.console = new ConsoleOutput('consoleOutput');
+    // Shared ConsoleOutput themed to reproduce MuscleMap's exact `console-*` DOM + semantic
+    // level colouring (warning:/error:/…failed) and plain console.log mirroring.
+    this.console = new ConsoleOutput({
+      outputElementId: 'consoleOutput',
+      lineClass: 'console-line',
+      timeClass: 'console-time',
+      messageClass: 'console-message',
+      separator: ' ',
+      levelOn: 'message',
+      levelClass: (level) => (level === 'info' ? '' : level),
+      deriveLevel: (text) => {
+        const n = String(text).trim().toLowerCase();
+        if (n.startsWith('warning:')) return 'warning';
+        if (n.startsWith('error:') || n.includes('failed')) return 'error';
+        return 'info';
+      },
+      mirror: (text) => console.log(text),
+    });
     this.progress = new ProgressManager(Config.PROGRESS_CONFIG);
     this.muscleLegend = new MuscleLegend('muscleLegend');
     this.metricsSummary = new MetricsSummary('metricsSummary');
@@ -287,7 +304,13 @@ class MuscleMapApp {
     if (cancelBtn) cancelBtn.addEventListener('click', () => this.cancelSegmentation());
 
     const copyConsole = document.getElementById('copyConsole');
-    if (copyConsole) copyConsole.addEventListener('click', () => this.console.copyToClipboard());
+    if (copyConsole) copyConsole.addEventListener('click', async () => {
+      const ok = await this.console.copyToClipboard();
+      if (ok) {
+        copyConsole.textContent = 'Copied!';
+        setTimeout(() => { copyConsole.textContent = 'Copy'; }, 1500);
+      }
+    });
 
     const clearConsole = document.getElementById('clearConsole');
     if (clearConsole) clearConsole.addEventListener('click', () => this.console.clear());

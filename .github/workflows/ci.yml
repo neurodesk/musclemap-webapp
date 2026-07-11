@@ -21,9 +21,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # Syntax/lint for every package that defines a lint task (apps: acorn; analytics: node --check).
       - run: pnpm exec turbo run lint
-      # Light, deterministic unit tests (parity + telemetry allow-list).
+      # Light, deterministic unit tests (parity + telemetry allow-list + shared library).
       - run: pnpm --filter musclemap run test
       - run: pnpm --filter @neurodesk/analytics run test
+      - run: pnpm --filter @neurodesk/webapp-components run test
 
   e2e:
     runs-on: ubuntu-latest

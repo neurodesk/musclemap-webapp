@@ -19,6 +19,7 @@
     "@neurodesk/webapp-components": "workspace:*"
   },
   "devDependencies": {
-    "@playwright/test": "^1.44.0"
+    "@playwright/test": "^1.44.0",
+    "jsdom": "^24.0.0"
   }
 }
