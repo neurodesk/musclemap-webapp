@@ -1,8 +1,15 @@
-# WASM files (downloaded by setup.sh)
-web/wasm/
+# Dependencies
+node_modules/
 
-# Model files - committed for GitHub Pages deployment
-# web/models/*.onnx
+# Build output
+dist/
+**/dist/
+.turbo/
+playwright-report/
+test-results/
+
+# WASM files (downloaded by per-app setup.sh)
+apps/*/web/wasm/
 
 # OS files
 .DS_Store
