@@ -16,5 +16,7 @@ test("import map resolves shared ProgressManager and it updates #progressBar", a
 
   const fromShared = await page.evaluate(() => window.__fromSharedPackage === true);
   expect(fromShared).toBe(true);
+  // file-io import-map entry resolves and works in-browser.
+  expect(await page.evaluate(() => window.__fileIoOk === true)).toBe(true);
   expect(errors).toEqual([]);
 });

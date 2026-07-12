@@ -3,6 +3,7 @@
  *
  * Handles Web Worker lifecycle for ONNX model inference.
  */
+import { downloadFile } from '@neurodesk/webapp-components/file-io';
 
 import { VERSION } from '../app/config.js';
 
@@ -250,15 +251,7 @@ export class InferenceExecutor {
       return;
     }
 
-    const file = this.results[stage].file;
-    const url = URL.createObjectURL(file);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = file.name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadFile(this.results[stage].file);
   }
 
   downloadAll() {

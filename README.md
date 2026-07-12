@@ -51,20 +51,27 @@ for the full rationale, the shared/app boundary, and the migration plan.
   resolves `@neurodesk/webapp-components` in Chromium (`apps/*/e2e/`).
 - **CI is active** (`.github/workflows/ci.yml`): `turbo run lint`, light unit tests (MuscleMap parity,
   analytics allow-list), and the per-app browser smoke matrix.
-- **Tier-1 extractions (MuscleMap pilot), each behind a parity test:** `ProgressManager`,
-  `ModalManager`, and `ConsoleOutput` now come from the shared library. The latter two had **drifted**,
-  so the library was **reconciled backward-compatibly** (ModalManager accepts a string id; ConsoleOutput
-  gained theming/behaviour options whose defaults preserve existing markup) and MuscleMap gets
-  byte-identical DOM via options — proven by `apps/musclemap/test/ui-*-parity.test.js` (progress via a
-  DOM stub, modal via a stub, console via jsdom). The interim wiring is a native-ESM import map + a
-  vendored copy of the library, which **preserves the classic `importScripts` inference worker and
-  relative asset paths untouched** — no bundler cutover.
+- **Tier-1 extractions (MuscleMap pilot), each behind a parity test:**
+  - **UI:** `ProgressManager`, `ModalManager`, `ConsoleOutput` now come from the shared library. The
+    latter two had **drifted**, so the library was **reconciled backward-compatibly** (ModalManager
+    accepts a string id; ConsoleOutput gained theming/behaviour options whose defaults preserve existing
+    markup) and MuscleMap gets byte-identical DOM via options.
+  - **file-io:** the generic download helpers (`downloadFile`/`downloadBlob`, previously duplicated in
+    `InferenceExecutor` and `MetricsSummary`) and NIfTI file detection (`isNiftiFile`) now come from
+    `@neurodesk/webapp-components/file-io`.
+  - Proven by `apps/musclemap/test/*-parity.test.js` (progress/modal via DOM stubs, console + download
+    via jsdom, detection by table). The interim wiring is a native-ESM import map + a vendored copy of
+    the library, which **preserves the classic `importScripts` inference worker and relative asset paths
+    untouched** — no bundler cutover.
 
 ## Not yet done (tracked follow-ups)
 
-- Extract the remaining shared-able pieces (DICOM→NIfTI, NIfTI utils, viewer/file-io controllers) the
-  same way, each behind a parity test. Metric renderers (IMF/Dixon/CSV) and scientific workers stay in
-  the app by design. The other apps have the wiring in place but still use their own local modules.
+- The heavy NIfTI I/O (`readNiftiImageData`, `create*Nifti`, ~400 lines) and the dcm2niix DICOM engine
+  (wasm) have **diverged into scientific/app-specific territory and lack byte-parity fixtures**, so they
+  stay in the app for now — extracting them safely needs real NIfTI fixtures + tolerance tests. Metric
+  renderers (IMF/Dixon/CSV) and scientific workers stay in the app by design.
+- Propagate the same extractions to the other three apps (their wiring is already in place; they still
+  use local modules).
 - Run each app's own heavy test suite in CI (needs fixtures + `onnxruntime-node` native build).
 - **Cloudflare deploy** (`docs/architecture/examples/deploy.cloudflare.yml`) activates once the
   Pages projects and `CLOUDFLARE_API_TOKEN`/`ACCOUNT_ID` secrets exist.

@@ -4,6 +4,7 @@
  * Displays volumetric metrics summary and provides CSV download
  * after segmentation completes.
  */
+import { downloadBlob } from '@neurodesk/webapp-components/file-io';
 export class MetricsSummary {
   constructor(containerId = 'metricsSummary') {
     this.containerId = containerId;
@@ -172,15 +173,7 @@ export class MetricsSummary {
     }
 
     const csv = rows.join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'musclemap_metrics.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(new Blob([csv], { type: 'text/csv' }), 'musclemap_metrics.csv');
   }
 
   _addImfCsvFields(row, imf, labelIndex) {

@@ -4,6 +4,7 @@
  * Handles MRI file input for segmentation and metrics.
  * Auto-detects NIfTI vs DICOM files and keeps multiple contrast roles.
  */
+import { isNiftiFile as sharedIsNiftiFile } from '@neurodesk/webapp-components/file-io';
 
 const FILE_ROLE_OPTIONS = [
   'anatomical',
@@ -57,8 +58,7 @@ export class FileIOController {
   }
 
   static isNiftiFile(file) {
-    const name = file.name.toLowerCase();
-    return name.endsWith('.nii') || name.endsWith('.nii.gz');
+    return sharedIsNiftiFile(file); // shared detector: .nii / .nii.gz (accepts File or name)
   }
 
   static fileKey(file) {
