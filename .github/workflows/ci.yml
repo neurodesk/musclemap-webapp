@@ -26,6 +26,10 @@ jobs:
       - run: pnpm --filter @neurodesk/analytics run test
       # Unit tests only — the library's full `test` also runs a browser showcase step.
       - run: pnpm --filter @neurodesk/webapp-components run test:unit
+      # Shared-component parity tests for the other apps (progress/modal/console/download).
+      - run: pnpm --filter vesselboost run test:shared
+      - run: pnpm --filter spinalcordtoolbox run test:shared
+      - run: pnpm --filter calmar run test:shared
 
   e2e:
     runs-on: ubuntu-latest

@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.33.0",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
@@ -16,6 +18,7 @@
     "@changesets/cli": "^2.27.0",
     "@playwright/test": "^1.44.0",
     "turbo": "^2.0.0",
-    "wrangler": "^3.0.0"
+    "wrangler": "^3.0.0",
+    "jsdom": "^24.0.0"
   }
 }

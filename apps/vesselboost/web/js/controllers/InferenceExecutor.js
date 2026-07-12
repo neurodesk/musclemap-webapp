@@ -1,3 +1,4 @@
+import { downloadFile } from '@neurodesk/webapp-components/file-io';
 /**
  * InferenceExecutor
  *
@@ -765,14 +766,7 @@ export class InferenceExecutor {
     }
 
     const file = this.results[stage].file;
-    const url = URL.createObjectURL(file);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = file.name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadFile(file);
   }
 
   downloadAll() {

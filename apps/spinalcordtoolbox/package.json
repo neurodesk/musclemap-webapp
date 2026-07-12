@@ -31,7 +31,8 @@
     "prebuild": "pnpm vendor && bash web/setup.sh",
     "build": "node ../../scripts/build-static.mjs",
     "pretest:e2e": "pnpm vendor",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:shared": "node --test test/shared-components-parity.test.js"
   },
   "dependencies": {
     "nifti-reader-js": "^0.8.0",
@@ -40,7 +41,8 @@
   },
   "devDependencies": {
     "acorn": "^8.16.0",
-    "@playwright/test": "^1.44.0"
+    "@playwright/test": "^1.44.0",
+    "jsdom": "^24.0.0"
   },
   "name": "spinalcordtoolbox",
   "version": "0.0.0",

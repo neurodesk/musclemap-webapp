@@ -50,8 +50,8 @@ import {
   renderFunctionalProfileTable
 } from './modules/function-profiles.js';
 import { ConsoleOutput } from './modules/ui/ConsoleOutput.js';
-import { ProgressManager } from './modules/ui/ProgressManager.js';
-import { ModalManager } from './modules/ui/ModalManager.js';
+import { ProgressManager } from '@neurodesk/webapp-components/ui';
+import { ModalManager } from '@neurodesk/webapp-components/ui';
 import * as Config from './app/config.js';
 
 const NETWORK_TOP_PERCENT_MAX = 10;

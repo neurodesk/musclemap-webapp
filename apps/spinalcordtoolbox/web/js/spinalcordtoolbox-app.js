@@ -8,9 +8,9 @@
 import { FileIOController } from './controllers/FileIOController.js';
 import { ViewerController } from './controllers/ViewerController.js';
 import { InferenceExecutor } from './controllers/InferenceExecutor.js';
-import { ConsoleOutput } from './modules/ui/ConsoleOutput.js';
-import { ProgressManager } from './modules/ui/ProgressManager.js';
-import { ModalManager } from './modules/ui/ModalManager.js';
+import { ConsoleOutput } from '@neurodesk/webapp-components/ui';
+import { ProgressManager } from '@neurodesk/webapp-components/ui';
+import { ModalManager } from '@neurodesk/webapp-components/ui';
 import { FallbackNiftiPreview } from './modules/fallback-nifti-preview.js';
 import * as Config from './app/config.js';
 import { generateNiivueColormap, getLabelName } from './app/labels.js';
@@ -38,7 +38,11 @@ export class SpinalCordToolboxApp {
     });
 
     // UI modules
-    this.console = new ConsoleOutput('consoleOutput');
+    this.console = new ConsoleOutput({
+      outputElementId: 'consoleOutput',
+      lineClass: 'console-line', timeClass: 'console-time', messageClass: 'console-message',
+      separator: ' ', levelOn: 'message', levelClass: () => '', mirror: (t) => console.log(t),
+    });
     this.progress = new ProgressManager(Config.PROGRESS_CONFIG);
 
     // State
@@ -273,7 +277,10 @@ export class SpinalCordToolboxApp {
     if (cancelBtn) cancelBtn.addEventListener('click', () => this.abortCurrentStep());
 
     const copyConsole = document.getElementById('copyConsole');
-    if (copyConsole) copyConsole.addEventListener('click', () => this.console.copyToClipboard());
+    if (copyConsole) copyConsole.addEventListener('click', async () => {
+      const ok = await this.console.copyToClipboard();
+      if (ok) { copyConsole.textContent = 'Copied!'; setTimeout(() => { copyConsole.textContent = 'Copy'; }, 1500); }
+    });
 
     const clearConsole = document.getElementById('clearConsole');
     if (clearConsole) clearConsole.addEventListener('click', () => this.console.clear());
